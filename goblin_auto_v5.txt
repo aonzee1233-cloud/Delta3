@@ -1,0 +1,722 @@
+--[[
+Goblin Auto v5 - Fisch / FischFright 3
+Delta / Roblox Luau
+
+Changes from v4:
+- Recursive Goblin scan with UID deduplication and live retry cooldowns.
+- Waits for the Goblin's actual dialog before attempting to choose difficulty.
+- Difficulty selection only accepts a button whose text explicitly contains
+  the configured difficulty AND Goblin-quest phrasing; excludes Dismiss/time-left.
+- Does not blindly click arbitrary newly-visible buttons.
+- Reads visible UI text for supported objectives.
+- Logs unsupported objectives and leaves them for manual completion.
+- Includes Auto ON/OFF, Copy report, Dump UI, Clear, and Stop controls.
+
+Note: Roblox UI / server behavior can change; this is not tested in a live server.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local TextChatService = game:GetService("TextChatService")
+local GuiService = game:GetService("GuiService")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local genv = (getgenv and getgenv()) or _G
+
+-- Stop an older copy first.
+if genv.GoblinAutoStop then
+    pcall(genv.GoblinAutoStop)
+end
+
+local CFG = {
+    difficulty = "Easy", -- Easy | Normal | Hard | Extreme | Ultimate
+    scanDelay = 2.0,
+    retryDelay = 8.0,
+    dialogTimeout = 10.0,
+    objectiveTimeout = 8.0,
+    tpOffset = CFrame.new(0, 3, 6),
+    autoSupportedObjectives = true,
+}
+
+local running = true
+local enabled = true
+local lines = {}
+local seenCalls = {}
+local connections = {}
+local completed = setmetatable({}, { __mode = "k" })
+local retryAt = setmetatable({}, { __mode = "k" })
+local activeGoblin = nil
+local dialogEventAt = 0
+
+local function log(message)
+    message = tostring(message)
+    if #lines < 1800 then
+        table.insert(lines, os.date("%H:%M:%S") .. " | " .. message)
+    end
+    print("[GoblinAuto v5] " .. message)
+end
+
+local function safeFullName(inst)
+    local ok, result = pcall(function() return inst:GetFullName() end)
+    return ok and result or tostring(inst)
+end
+
+local function getCharacter()
+    local character = LocalPlayer.Character
+    if not character then return nil, nil, nil end
+    return character, character:FindFirstChild("HumanoidRootPart"),
+        character:FindFirstChildOfClass("Humanoid")
+end
+
+local function cleanText(value)
+    local text = tostring(value or "")
+    text = text:gsub("<[^>]+>", "")
+    text = text:gsub("\226\128\156", '"')
+        :gsub("\226\128\157", '"')
+        :gsub("\226\128\153", "'")
+    return text
+end
+
+local function isVisible(guiObject)
+    if not guiObject or not guiObject.Parent then return false end
+    local node = guiObject
+    while node do
+        if node:IsA("GuiObject") and not node.Visible then
+            return false
+        end
+        if node:IsA("ScreenGui") and not node.Enabled then
+            return false
+        end
+        if node == LocalPlayer:FindFirstChildOfClass("PlayerGui") then
+            return true
+        end
+        node = node.Parent
+    end
+    return false
+end
+
+local function visibleTextObjects()
+    local result = {}
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return result end
+
+    for _, object in ipairs(playerGui:GetDescendants()) do
+        if (object:IsA("TextButton") or object:IsA("TextLabel")) and isVisible(object) then
+            local text = cleanText(object.Text)
+            if text ~= "" then
+                table.insert(result, {
+                    object = object,
+                    text = text,
+                    lower = text:lower(),
+                    path = safeFullName(object),
+                })
+            end
+        end
+    end
+    return result
+end
+
+local function dumpUI()
+    log("---- UI DUMP (visible text) ----")
+    for _, item in ipairs(visibleTextObjects()) do
+        local isButton = item.object:IsA("GuiButton")
+        log(("UI %s | %q | button=%s"):format(
+            item.path, item.text:sub(1, 180), tostring(isButton)
+        ))
+    end
+    log("---- END UI DUMP ----")
+end
+
+local function getGoblinFolder()
+    local world = workspace:FindFirstChild("world")
+    local npcs = world and world:FindFirstChild("npcs")
+    return npcs and npcs:FindFirstChild("FischfrightGoblins")
+end
+
+local function isGoblinModel(model)
+    if not model:IsA("Model") then return false end
+    local npcType = model:GetAttribute("NpcType")
+    local uid = model:GetAttribute("UID")
+    local navTag = model:GetAttribute("Nav/Tag")
+    local lowerName = model.Name:lower()
+    local hasPrompt = model:FindFirstChildWhichIsA("ProximityPrompt", true) ~= nil
+
+    if npcType == "FischfrightGoblin" then return true end
+    if type(uid) == "string" and uid:lower():find("goblin", 1, true) then return true end
+    if type(navTag) == "string" and navTag:lower():find("goblin", 1, true) then return true end
+    return hasPrompt and lowerName:find("goblin", 1, true) ~= nil
+end
+
+local function findGoblins()
+    local result, seen = {}, {}
+    local folder = getGoblinFolder()
+    if not folder then
+        return result, "Goblin folder not present in client"
+    end
+
+    -- Include descendants, because streamed/nested NPC models may not be direct children.
+    for _, object in ipairs(folder:GetDescendants()) do
+        if object:IsA("Model") and not seen[object] and isGoblinModel(object) then
+            seen[object] = true
+            table.insert(result, object)
+        end
+    end
+
+    -- Also include direct children in case a model has no descendants yet.
+    for _, object in ipairs(folder:GetChildren()) do
+        if object:IsA("Model") and not seen[object] and isGoblinModel(object) then
+            seen[object] = true
+            table.insert(result, object)
+        end
+    end
+
+    return result
+end
+
+local function teleportTo(model)
+    local _, root = getCharacter()
+    if not root or not model or not model.Parent then
+        log("NOTE: teleport skipped; character or Goblin model missing")
+        return false
+    end
+
+    local ok, pivot = pcall(function() return model:GetPivot() end)
+    if not ok then
+        log("NOTE: could not read Goblin pivot: " .. model.Name)
+        return false
+    end
+
+    pcall(function()
+        LocalPlayer:RequestStreamAroundAsync(pivot.Position)
+    end)
+
+    -- Reacquire root after streaming / possible respawn.
+    local _, currentRoot = getCharacter()
+    if not currentRoot then return false end
+    currentRoot.CFrame = pivot * CFG.tpOffset
+    currentRoot.AssemblyLinearVelocity = Vector3.zero
+    task.wait(0.8)
+    return model.Parent ~= nil
+end
+
+local function getPrompt(model)
+    if not model or not model.Parent then return nil end
+    return model:FindFirstChildWhichIsA("ProximityPrompt", true)
+end
+
+local function triggerTalk(model)
+    local prompt = getPrompt(model)
+    if not prompt then
+        log("NOTE: no ProximityPrompt on " .. (model and model.Name or "nil"))
+        return false
+    end
+
+    activeGoblin = model
+    dialogEventAt = os.clock()
+
+    -- Do not alter the prompt's game properties; only activate it.
+    local ok = false
+    if fireproximityprompt then
+        ok = pcall(function() fireproximityprompt(prompt) end)
+    else
+        ok = pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(math.max(prompt.HoldDuration, 0.1))
+            prompt:InputHoldEnd()
+        end)
+    end
+
+    log("TALK " .. model.Name .. " | " .. safeFullName(prompt))
+    return ok
+end
+
+local function getClickButton(textObject)
+    if textObject:IsA("GuiButton") then return textObject end
+    return textObject:FindFirstAncestorWhichIsA("GuiButton")
+end
+
+local function clickButton(button)
+    if not button or not button.Parent or not isVisible(button) then
+        return false, "not visible"
+    end
+
+    -- Prefer the executor's button signal support, then physical click.
+    if getconnections then
+        local ok, connectionsList = pcall(getconnections, button.Activated)
+        if ok and type(connectionsList) == "table" then
+            for _, connection in ipairs(connectionsList) do
+                if pcall(function() connection:Fire() end) then
+                    return true, "Activated"
+                end
+            end
+        end
+
+        local ok2, mouseConnections = pcall(getconnections, button.MouseButton1Click)
+        if ok2 and type(mouseConnections) == "table" then
+            for _, connection in ipairs(mouseConnections) do
+                if pcall(function() connection:Fire() end) then
+                    return true, "MouseButton1Click"
+                end
+            end
+        end
+    end
+
+    local vim
+    pcall(function() vim = game:GetService("VirtualInputManager") end)
+    if vim then
+        local position, size = button.AbsolutePosition, button.AbsoluteSize
+        local screenGui = button:FindFirstAncestorWhichIsA("ScreenGui")
+        local inset = (screenGui and screenGui.IgnoreGuiInset) and Vector2.zero
+            or GuiService:GetGuiInset()
+        local x = position.X + size.X / 2 + inset.X
+        local y = position.Y + size.Y / 2 + inset.Y
+        local ok = pcall(function()
+            vim:SendMouseButtonEvent(x, y, 0, true, game, 0)
+            task.wait(0.05)
+            vim:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        end)
+        if ok then return true, "VIM" end
+    end
+
+    return false, "no supported click method"
+end
+
+local function isExcludedButton(text)
+    local lower = cleanText(text):lower()
+    local excludes = {
+        "dismiss", "time left", "touch to open", "never mind",
+        "nevermind", "cancel", "goodbye", "leave", "close",
+        "quest completed", "trade request", "buy", "robux",
+    }
+    for _, word in ipairs(excludes) do
+        if lower:find(word, 1, true) then return true end
+    end
+    return false
+end
+
+local function findDifficultyButton()
+    local wanted = CFG.difficulty:lower()
+    local matches = {}
+
+    for _, item in ipairs(visibleTextObjects()) do
+        local button = getClickButton(item.object)
+        local lower = item.lower
+        if button and not isExcludedButton(lower) then
+            local hasDifficulty = lower:find(wanted, 1, true) ~= nil
+            local goblinPhrase = lower:find("goblin", 1, true)
+                or lower:find("one", 1, true)
+                or lower:find("quest", 1, true)
+            if hasDifficulty and goblinPhrase then
+                table.insert(matches, { button = button, text = item.text, path = item.path })
+            end
+        end
+    end
+
+    -- Pick the shortest exact-looking candidate; avoid large unrelated UI buttons.
+    table.sort(matches, function(a, b) return #a.text < #b.text end)
+    return matches[1]
+end
+
+local function waitForDifficultyButton()
+    local deadline = os.clock() + CFG.dialogTimeout
+    while running and os.clock() < deadline do
+        local match = findDifficultyButton()
+        if match then return match end
+        task.wait(0.25)
+    end
+    return nil
+end
+
+local function readObjective()
+    local candidates = {}
+    for _, item in ipairs(visibleTextObjects()) do
+        local lower = item.lower
+        local looksLikeObjective =
+            lower:find("type ", 1, true)
+            or lower:find("dance for", 1, true)
+            or lower:find("jump ", 1, true)
+            or lower:find("walk ", 1, true)
+            or lower:find("perfect catch", 1, true)
+            or lower:find("trick-or-treat", 1, true)
+            or lower:find("catch ", 1, true)
+            or lower:find("drown", 1, true)
+            or lower:find("guess ", 1, true)
+            or lower:find("insult", 1, true)
+            or lower:find("beatrix", 1, true)
+        if looksLikeObjective and not isExcludedButton(lower) then
+            table.insert(candidates, item.text)
+        end
+    end
+    return candidates[1]
+end
+
+local function parseNumber(text, pattern, fallback)
+    local value = text:lower():match(pattern)
+    return tonumber(value) or fallback
+end
+
+local function parseObjective(raw)
+    if not raw then return nil end
+    local text = cleanText(raw)
+    local lower = text:lower()
+
+    local quoted = text:match('[Tt]ype%s*"(.-)"')
+    if quoted then
+        local count = parseNumber(lower, "in chat%s+(%d+)%s+times", 1)
+        if lower:find("twice", 1, true) then count = 2 end
+        return { kind = "chat", text = quoted, count = count, raw = text }
+    end
+
+    if lower:find("dance for", 1, true) then
+        return { kind = "dance", seconds = parseNumber(lower, "dance for%s+(%d+)", 15), raw = text }
+    end
+
+    if lower:find("jump", 1, true) then
+        local n = parseNumber(lower, "jump%s+(%d+)", nil)
+        if n then return { kind = "jump", count = n, raw = text } end
+    end
+
+    if lower:find("walk", 1, true) then
+        local n = parseNumber(lower, "walk%s+(%d+)", nil)
+        if n then return { kind = "walk", studs = n, raw = text } end
+    end
+
+    -- These require fishing, special NPCs, or minigames; do not fake completion.
+    for _, keyword in ipairs({
+        "catch", "perfect", "trick-or-treat", "trick or treat",
+        "guess", "insult", "beatrix", "drown", "burn", "freeze",
+    }) do
+        if lower:find(keyword, 1, true) then
+            return { kind = "manual", reason = keyword, raw = text }
+        end
+    end
+
+    return nil
+end
+
+local function sendChat(message)
+    local ok = false
+    if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+        local channels = TextChatService:FindFirstChild("TextChannels")
+        local channel = channels and (
+            channels:FindFirstChild("RBXGeneral")
+            or channels:FindFirstChildWhichIsA("TextChannel")
+        )
+        if channel then
+            ok = pcall(function() channel:SendAsync(message) end)
+        end
+    end
+
+    if not ok then
+        local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        local request = events and events:FindFirstChild("SayMessageRequest")
+        if request then
+            ok = pcall(function() request:FireServer(message, "All") end)
+        end
+    end
+    return ok
+end
+
+local function performObjective(objective)
+    if not CFG.autoSupportedObjectives then return false end
+
+    if objective.kind == "chat" then
+        for _ = 1, objective.count do
+            if not running or not enabled then return false end
+            if not sendChat(objective.text) then
+                log("NOTE: chat send failed; objective left for manual completion")
+                return false
+            end
+            log("CHAT " .. objective.text)
+            task.wait(1.8)
+        end
+        return true
+    end
+
+    if objective.kind == "dance" then
+        local _, _, humanoid = getCharacter()
+        if not humanoid then return false end
+        local ok, result = pcall(function() return humanoid:PlayEmote("dance") end)
+        if not (ok and result) then
+            sendChat("/e dance")
+        end
+        log("DANCE " .. objective.seconds .. "s")
+        task.wait(objective.seconds + 2)
+        return running and enabled
+    end
+
+    if objective.kind == "jump" then
+        local _, _, humanoid = getCharacter()
+        if not humanoid then return false end
+        log("JUMP x" .. objective.count)
+        for _ = 1, objective.count do
+            if not running or not enabled then return false end
+            humanoid.Jump = true
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            task.wait(0.55)
+        end
+        return true
+    end
+
+    if objective.kind == "walk" then
+        local _, root, humanoid = getCharacter()
+        if not root or not humanoid then return false end
+        local targetDistance = objective.studs + 8
+        local walked, lastPosition = 0, root.Position
+        local heartbeat
+        heartbeat = RunService.Heartbeat:Connect(function()
+            local _, currentRoot = getCharacter()
+            if currentRoot then
+                local distance = (currentRoot.Position - lastPosition).Magnitude
+                if distance < 8 then walked += distance end
+                lastPosition = currentRoot.Position
+            end
+        end)
+
+        local direction = root.CFrame.LookVector * Vector3.new(1, 0, 1)
+        if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+        local start = root.Position
+        local destination = start + direction.Unit * math.min(targetDistance, 25)
+        local reverse = start
+        local deadline = os.clock() + targetDistance / 7 + 25
+        log("WALK target=" .. targetDistance .. " studs")
+
+        while running and enabled and walked < targetDistance and os.clock() < deadline do
+            local target = destination
+            if (root.Position - destination).Magnitude < 4 then target = reverse end
+            humanoid:MoveTo(target)
+            task.wait(0.3)
+        end
+        if heartbeat then heartbeat:Disconnect() end
+        return walked >= objective.studs
+    end
+
+    log("SKIP (manual objective): " .. tostring(objective.reason or objective.kind))
+    return false
+end
+
+local function tryHandleGoblin(model)
+    if not model or not model.Parent or completed[model] then return false end
+
+    local uid = model:GetAttribute("UID") or model:GetAttribute("Nav/Tag") or model.Name
+    log("TARGET " .. model.Name .. " | " .. tostring(uid))
+
+    if not teleportTo(model) then
+        log("NOTE: teleport failed for " .. model.Name)
+        return false
+    end
+
+    if not triggerTalk(model) then return false end
+    task.wait(0.7)
+
+    local match = waitForDifficultyButton()
+    if not match then
+        log("NOTE: no verified " .. CFG.difficulty .. " choice found for " .. model.Name)
+        log("HINT: open the Goblin dialog manually, then press Dump UI")
+        return false
+    end
+
+    log(("PICK candidate %q | %s"):format(match.text:sub(1, 100), match.path))
+    local clicked, method = clickButton(match.button)
+    if not clicked then
+        log("NOTE: difficulty click failed: " .. tostring(method))
+        return false
+    end
+    log("PICKED " .. CFG.difficulty .. " via " .. method)
+
+    -- Wait for the quest text to appear. Never click arbitrary buttons during this phase.
+    local deadline = os.clock() + CFG.objectiveTimeout
+    local objective, raw
+    while running and enabled and os.clock() < deadline do
+        raw = readObjective()
+        objective = parseObjective(raw)
+        if objective then break end
+        task.wait(0.3)
+    end
+
+    if not objective then
+        log("NOTE: objective not detected after difficulty selection")
+        dumpUI()
+        return false
+    end
+
+    log("OBJECTIVE " .. objective.raw .. " -> " .. objective.kind)
+    if objective.kind == "manual" then
+        log("SKIP (manual objective): " .. tostring(objective.reason))
+        return false
+    end
+
+    if not performObjective(objective) then
+        log("NOTE: objective action did not confirm completion; Goblin not marked done")
+        return false
+    end
+
+    -- Do not auto-click random buttons to claim. Return to NPC and let the user verify
+    -- the actual claim/finish choice rather than risking a Dismiss/other unrelated click.
+    if model.Parent then
+        teleportTo(model)
+        triggerTalk(model)
+        task.wait(0.7)
+        log("ACTION REQUIRED: inspect Goblin finish/claim dialog; no blind claim click")
+        dumpUI()
+    end
+
+    -- Prevent repeating the same objective every retry cycle. Claiming remains manual.
+    completed[model] = true
+    log("OBJECTIVE ACTION FINISHED; Goblin marked visited (claim manually)")
+    return true
+end
+
+-- Remote/dialog event logger (observational only).
+local function formatValue(value, depth)
+    depth = depth or 0
+    if typeof(value) == "Instance" then return safeFullName(value) end
+    if type(value) == "table" then
+        if depth >= 2 then return "{...}" end
+        local parts = {}
+        for key, item in pairs(value) do
+            table.insert(parts, tostring(key) .. "=" .. formatValue(item, depth + 1))
+        end
+        return "{" .. table.concat(parts, ", ") .. "}"
+    end
+    return tostring(value)
+end
+
+local function listenRemote(remote)
+    if not remote then return end
+    if remote:IsA("RemoteEvent") then
+        table.insert(connections, remote.OnClientEvent:Connect(function(...)
+            local packed = table.pack(...)
+            local parts = {}
+            for i = 1, packed.n do
+                parts[i] = formatValue(packed[i])
+            end
+            log("EVENT " .. remote.Name .. "(" .. table.concat(parts, ", ") .. ")")
+        end))
+    end
+end
+
+local events = ReplicatedStorage:FindFirstChild("events")
+if events then listenRemote(events:FindFirstChild("dialogstart")) end
+
+table.insert(connections, ProximityPromptService.PromptTriggered:Connect(function(prompt)
+    log("PROMPT " .. safeFullName(prompt) .. " | " .. prompt.ActionText .. " / " .. prompt.ObjectText)
+end))
+
+-- Small mobile-friendly UI.
+local guiParent
+pcall(function()
+    guiParent = gethui and gethui()
+end)
+if not guiParent then
+    guiParent = game:GetService("CoreGui")
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "GoblinAutoV5"
+gui.ResetOnSpawn = false
+gui.Parent = guiParent
+
+local function addButton(label, y, callback)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 150, 0, 36)
+    button.AnchorPoint = Vector2.new(1, 0)
+    button.Position = UDim2.new(1, -10, 0, y)
+    button.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextSize = 14
+    button.Text = label
+    button.Parent = gui
+    button.Activated:Connect(function()
+        local ok, err = pcall(callback, button)
+        if not ok then log("UI ERR: " .. tostring(err)) end
+    end)
+    return button
+end
+
+addButton("Auto: ON", 110, function(button)
+    enabled = not enabled
+    button.Text = enabled and "Auto: ON" or "Auto: OFF"
+    log("AUTO " .. (enabled and "ON" or "OFF"))
+end)
+
+addButton("Copy report", 152, function()
+    local report = table.concat(lines, "\n")
+    if setclipboard then
+        setclipboard(report)
+        log("REPORT copied")
+    else
+        warn("Executor does not support setclipboard")
+    end
+end)
+
+addButton("Dump UI", 194, function()
+    dumpUI()
+end)
+
+addButton("Clear", 236, function()
+    table.clear(lines)
+    table.clear(seenCalls)
+    log("LOG cleared")
+end)
+
+addButton("Stop", 278, function()
+    running = false
+    enabled = false
+    for _, connection in ipairs(connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    if gui and gui.Parent then gui:Destroy() end
+    log("STOPPED")
+end)
+
+genv.GoblinAutoStop = function()
+    running = false
+    enabled = false
+    for _, connection in ipairs(connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    if gui and gui.Parent then gui:Destroy() end
+end
+
+task.spawn(function()
+    log("READY v5 | difficulty=" .. CFG.difficulty .. " | recursive scan + safe dialog selection")
+    while running do
+        if enabled then
+            local goblins, reason = findGoblins()
+            local _, root = getCharacter()
+
+            if #goblins == 0 then
+                if reason then
+                    log("SCAN: " .. reason)
+                end
+            else
+                if root then
+                    table.sort(goblins, function(a, b)
+                        local aPos, bPos
+                        pcall(function() aPos = a:GetPivot().Position end)
+                        pcall(function() bPos = b:GetPivot().Position end)
+                        if not aPos then return false end
+                        if not bPos then return true end
+                        return (aPos - root.Position).Magnitude < (bPos - root.Position).Magnitude
+                    end)
+                end
+
+                log("SWEEP found " .. #goblins .. " Goblin model(s)")
+                for _, model in ipairs(goblins) do
+                    if not running or not enabled then break end
+                    if model.Parent and not completed[model] and os.clock() >= (retryAt[model] or 0) then
+                        local ok, result = pcall(tryHandleGoblin, model)
+                        if not ok then
+                            log("ERR " .. tostring(result))
+                        end
+                        retryAt[model] = os.clock() + CFG.retryDelay
+                    end
+                end
+            end
+        end
+        task.wait(CFG.scanDelay)
+    end
+end)
