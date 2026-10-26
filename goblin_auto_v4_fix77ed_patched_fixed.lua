@@ -125,9 +125,15 @@ local function goblins()
 	local folder = npcs and npcs:FindFirstChild("FischfrightGoblins")
 	if folder then
 		for _, m in ipairs(folder:GetChildren()) do
-			-- a model without any part is not streamed in yet
-			if m:IsA("Model") and m:FindFirstChildWhichIsA("BasePart", true) then
-				out[#out + 1] = m
+			if m:IsA("Model") then
+				local loaded = m:FindFirstChildWhichIsA("BasePart", true) ~= nil
+				local p = m:GetPivot().Position
+				local ok = loaded or (p.Y > 100 and Vector3.new(p.X, 0, p.Z).Magnitude > 150)
+				if not loaded then
+					local d = ("FAR %s | %.0f, %.0f, %.0f | %s"):format(m.Name, p.X, p.Y, p.Z, ok and "use" or "ignored")
+					if not seen[d] then seen[d] = true; log(d) end
+				end
+				if ok then out[#out + 1] = m end
 			end
 		end
 	end
@@ -139,6 +145,22 @@ local function tpTo(model)
 	if not hrp or not model.Parent then return false end
 	local cf = model:GetPivot()
 	pcall(function() lp:RequestStreamAroundAsync(cf.Position) end)
+	if not model:FindFirstChildWhichIsA("BasePart", true) then
+		hrp.Anchored = true -- ลอยรอให้ goblin โหลด
+		hrp.CFrame = cf + Vector3.new(0, 40, 0)
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		local t0 = os.clock()
+		while model.Parent and os.clock() - t0 < 8
+			and not model:FindFirstChildWhichIsA("BasePart", true) do
+			task.wait(0.3)
+		end
+		hrp.Anchored = false
+		if not model.Parent or not model:FindFirstChildWhichIsA("BasePart", true) then
+			log("NOTE: " .. model.Name .. " did not load at its saved spot")
+			return false
+		end
+		cf = model:GetPivot()
+	end
 	hrp.CFrame = cf * CFG.tpOffset
 	hrp.AssemblyLinearVelocity = Vector3.zero
 	task.wait(1)
@@ -921,6 +943,7 @@ local function turnIn(m)
 	setStatus("claim: " .. m.Name)
 	if not tpTo(m) then return false end
 	if not openDialog(m) then return false end
+	s.pos = m:GetPivot().Position
 	advance(5, false)
 	log("DONE " .. m.Name)
 	return true
@@ -1252,6 +1275,7 @@ task.spawn(function()
 						elseif res then
 							s.done = true
 							s.at = os.clock()
+							sweepNow = true -- ทำเสร็จตัวนึงแล้วไล่หาตัวต่อไปทันที
 						end
 					end
 				end
