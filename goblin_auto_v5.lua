@@ -40,7 +40,6 @@ if not okVim then VIM = nil end
 
 local CFG = {
 	difficulty = "Easy",     -- Easy | Normal | Hard | Extreme | Ultimate
-	allow = { easy = true, normal = false, hard = false, extreme = false, ultimate = false }, -- all false = talk to nobody
 	scanDelay = 2,           -- seconds between goblin scans
 	dialogWait = 1.1,        -- seconds between dialog clicks
 	tpOffset = CFrame.new(0, 3, 6),
@@ -49,10 +48,23 @@ local CFG = {
 	useDisplayName = false,  -- fills <player> if it ever shows up literally in a sentence
 	resumeActive = true,     -- if a goblin quest is already active, do it instead of failing
 	sweep = true,            -- visit the event islands to find goblins that are not loaded
-	sweepEvery = 300,        -- seconds between sweeps while no goblin is around
+	sweepEvery = 600,        -- seconds between sweeps while no goblin is around
 	sweepWait = 2.5,         -- seconds to wait on each island for things to stream in
 	retryAfter = 300,        -- a finished goblin that stays in place is retried after this long
 	extraSpots = {},         -- optional: { { name = "Island", pos = Vector3.new(x, y, z) } }
+	talk = true,             -- false = ไม่คุยกับ goblin เลย
+	levels = { easy = true, normal = false, hard = false, extreme = false, ultimate = false },
+	islandPos = {
+		["Moosewood"]       = Vector3.new(380, 135, 234),
+		["Roslit Bay"]      = Vector3.new(-1473, 133, 708),
+		["Forsaken Shores"] = Vector3.new(-2491, 133, 1561),
+		["Sunstone Island"] = Vector3.new(-913, 138, -1133),
+		["Terrapin Island"] = Vector3.new(-193, 135, 1951),
+		["Mushgrove Swamp"] = Vector3.new(2434, 132, -692),
+		["Ancient Isle"]    = Vector3.new(6056, 195, 307),
+		["Lost Jungle"]     = Vector3.new(-2589, 158, -2194),
+		["Scoria Reach"]    = Vector3.new(-4976, 145, -1577),
+	},
 }
 
 local running, enabled = true, true
@@ -113,9 +125,15 @@ local function goblins()
 	local folder = npcs and npcs:FindFirstChild("FischfrightGoblins")
 	if folder then
 		for _, m in ipairs(folder:GetChildren()) do
-			-- a model without any part is not streamed in yet
-			if m:IsA("Model") and m:FindFirstChildWhichIsA("BasePart", true) then
-				out[#out + 1] = m
+			if m:IsA("Model") then
+				local loaded = m:FindFirstChildWhichIsA("BasePart", true) ~= nil
+				local p = m:GetPivot().Position
+				local ok = loaded or (p.Y > 100 and Vector3.new(p.X, 0, p.Z).Magnitude > 150)
+				if not loaded then
+					local d = ("FAR %s | %.0f, %.0f, %.0f | %s"):format(m.Name, p.X, p.Y, p.Z, ok and "use" or "ignored")
+					if not seen[d] then seen[d] = true; log(d) end
+				end
+				if ok then out[#out + 1] = m end
 			end
 		end
 	end
@@ -127,43 +145,93 @@ local function tpTo(model)
 	if not hrp or not model.Parent then return false end
 	local cf = model:GetPivot()
 	pcall(function() lp:RequestStreamAroundAsync(cf.Position) end)
+	if not model:FindFirstChildWhichIsA("BasePart", true) then
+		hrp.Anchored = true -- ลอยรอให้ goblin โหลด
+		hrp.CFrame = cf + Vector3.new(0, 40, 0)
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		local t0 = os.clock()
+		while model.Parent and os.clock() - t0 < 8
+			and not model:FindFirstChildWhichIsA("BasePart", true) do
+			task.wait(0.3)
+		end
+		hrp.Anchored = false
+		if not model.Parent or not model:FindFirstChildWhichIsA("BasePart", true) then
+			log("NOTE: " .. model.Name .. " did not load at its saved spot")
+			return false
+		end
+		cf = model:GetPivot()
+	end
 	hrp.CFrame = cf * CFG.tpOffset
 	hrp.AssemblyLinearVelocity = Vector3.zero
 	task.wait(1)
 	return model.Parent ~= nil
 end
 
----------------------------------------------------------------- saved island spots
-local HttpService = game:GetService("HttpService")
-local SAVE_FILE = "GoblinAuto_spots.json"
-local ISLANDS = { "Ancient Isle", "Drylands", "Everturn Forest", "Forsaken Shores", "Lost Jungle",
-	"Moosewood", "Mushgrove Swamp", "Roslit Bay", "Scoria Reach", "Skycrest",
-	"Sunstone Island", "Terrapin Island" }
-local saved = {} -- island name -> Vector3
-
-local function saveSpots()
-	if not writefile then return end
-	local t = {}
-	for k, v in pairs(saved) do t[k] = { v.X, v.Y, v.Z } end
-	pcall(function() writefile(SAVE_FILE, HttpService:JSONEncode(t)) end)
-end
-
-if isfile and readfile and isfile(SAVE_FILE) then
-	local ok, t = pcall(function() return HttpService:JSONDecode(readfile(SAVE_FILE)) end)
-	if ok and type(t) == "table" then
-		for k, v in pairs(t) do saved[k] = Vector3.new(v[1], v[2], v[3]) end
+local function exitEmote()
+	local hrp, hum = hrpOf()
+	if not hrp or not hum then return end
+	for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+		pcall(function() tr:Stop(0.1) end)
 	end
+	hum:MoveTo(hrp.Position + hrp.CFrame.LookVector * 4) -- ขยับตัวแล้วท่าเต้นจะหลุด
+	task.wait(0.4)
+	hum.Jump = true
+	task.wait(0.5)
 end
 
-local EVENT_ISLANDS = { "ancient", "drylands", "everturn", "forsaken", "lost jungle", "moosewood",
-	"mushgrove", "roslit", "scoria", "skycrest", "sunstone", "terrapin" }
+local ISLANDS = {
+	{ "Ancient Isle", "ancient" }, { "Drylands", "dryland" }, { "Everturn Forest", "everturn" },
+	{ "Forsaken Shores", "forsaken" }, { "Lost Jungle", "lost jungle", "lostjungle" },
+	{ "Moosewood", "moosewood" }, { "Mushgrove Swamp", "mushgrove" }, { "Roslit Bay", "roslit" },
+	{ "Scoria Reach", "scoria" }, { "Skycrest", "skycrest" }, { "Sunstone Island", "sunstone" },
+	{ "Terrapin Island", "terrapin" },
+}
+
+local function posOf(o)
+	if o:IsA("BasePart") then return o.Position end
+	if o:IsA("Model") then
+		local ok, cf = pcall(function() return o:GetPivot() end)
+		if ok then return cf.Position end
+	end
+	return nil
+end
+
+local function islandRoots()
+	local out = {}
+	local function add(r) if r then out[#out + 1] = r end end
+	local w = workspace:FindFirstChild("world")
+	local sp = w and w:FindFirstChild("spawns")
+	local z = workspace:FindFirstChild("zones")
+	add(sp and sp:FindFirstChild("TpSpots"))
+	add(w and w:FindFirstChild("map"))
+	add(z and z:FindFirstChild("fishing"))
+	return out
+end
+
+local function findIsland(isl)
+	local name = isl[1]
+	if CFG.islandPos[name] then return CFrame.new(CFG.islandPos[name]) end
+	for _, r in ipairs(islandRoots()) do
+		local best, bl
+		for _, o in ipairs(r:GetChildren()) do
+			local n = o.Name:lower()
+			for i = 2, #isl do
+				if n:find(isl[i], 1, true) and (not bl or #n < bl) and posOf(o) then
+					best, bl = o, #n
+				end
+			end
+		end
+		if best then return CFrame.new(posOf(best)) end
+	end
+	return nil
+end
 
 local function islandSpots()
 	local out = {}
 	local w = workspace:FindFirstChild("world")
 	local sp = w and w:FindFirstChild("spawns")
 	local tp = sp and sp:FindFirstChild("TpSpots")
-	if tp then
+	if false then
 		for _, p in ipairs(tp:GetChildren()) do
 			if p:IsA("BasePart") then
 				out[#out + 1] = { name = p.Name, cf = p.CFrame }
@@ -172,11 +240,12 @@ local function islandSpots()
 			end
 		end
 	end
+	for _, isl in ipairs(ISLANDS) do
+		local cf = findIsland(isl)
+		if cf then out[#out + 1] = { name = isl[1], cf = cf } end
+	end
 	for _, e in ipairs(CFG.extraSpots) do
 		out[#out + 1] = { name = e.name, cf = CFrame.new(e.pos) }
-	end
-	for name, pos in pairs(saved) do
-		out[#out + 1] = { name = name, cf = CFrame.new(pos) }
 	end
 	return out
 end
@@ -231,25 +300,19 @@ local function stOf(m)
 	return s
 end
 
-local learned = {} -- goblin name -> { d = "easy", at = time } : what that goblin type offers
-local function wanted(m)
-	local e = learned[m.Name]
-	if not e or os.clock() - e.at > 900 then return true end -- unknown yet: go and look once
-	return CFG.allow[e.d] == true
-end
+local diffByName = { ["goblin"] = "easy", ["ghoulish goblin"] = "normal" }
 
-local function anyAllowed()
-	for _, v in pairs(CFG.allow) do
-		if v then return true end
-	end
-	return false
+local function wantsModel(m)
+	if not CFG.talk then return false end
+	local lv = diffByName[m.Name:lower()]
+	return lv == nil or CFG.levels[lv] == true
 end
 
 local function fresh()
 	local out = {}
 	for _, m in ipairs(goblins()) do
 		local ok, s = pcall(stOf, m)
-		if ok and not s.done and s.tries < MAXTRY and wanted(m) then out[#out + 1] = m end
+		if ok and not s.done and s.tries < MAXTRY and wantsModel(m) then out[#out + 1] = m end
 	end
 	return out
 end
@@ -452,8 +515,28 @@ local function press(btn)
 	return "none"
 end
 
+local function closeDialog()
+	for _, g in ipairs(texts(false)) do
+		if clean(g.Text):lower():find("nevermind", 1, true) then
+			local b = clickTarget(g)
+			if b then
+				press(b)
+				return
+			end
+		end
+	end
+end
+
 ---------------------------------------------------------------- dialog
 local DIFF = { "easy", "normal", "hard", "extreme", "ultimate" }
+local function levelOrder()
+	local o = {}
+	for _, d in ipairs(DIFF) do
+		if CFG.levels[d] then o[#o + 1] = d end
+	end
+	return o
+end
+
 local EXCLUDE = { "never", "leave", "bye", "cancel", "close", "decline", "nope", "not now", "no thanks" }
 local QUESTY = { "goblin quest", "friend quest", "quest:", "track" }
 local PREFER = { "accept", "okay", "ok", "sure", "deal", "yes", "fine", "continue", "next",
@@ -545,10 +628,7 @@ local function diffButtons()
 end
 
 local function pickDifficulty()
-	local order = {}
-	for _, d in ipairs(DIFF) do
-		if CFG.allow[d] then order[#order + 1] = d end
-	end
+	local order = levelOrder()
 	local t0, settled = os.clock(), false
 	while os.clock() - t0 < 12 do
 		if not alive(dialogRoot) then dialogRoot = pickRoot() end
@@ -600,6 +680,7 @@ local function openDialog(model)
 			tpTo(model)
 		end
 		dialogAt[model] = nil
+		if attempt >= 2 then exitEmote() end
 		if fireproximityprompt and attempt % 2 == 1 then
 			pcall(fireproximityprompt, pp)
 		else
@@ -747,21 +828,6 @@ local function doChat(o)
 	return true
 end
 
-local function stopEmote()
-	local hrp, hum = hrpOf()
-	if not (hrp and hum) then return end
-	local an = hum:FindFirstChildOfClass("Animator")
-	if an then
-		for _, t in ipairs(an:GetPlayingAnimationTracks()) do
-			pcall(function() t:Stop(0.1) end)
-		end
-	end
-	hum.Jump = true
-	hum:ChangeState(Enum.HumanoidStateType.Jumping)
-	hum:MoveTo(hrp.Position + hrp.CFrame.LookVector * 5)
-	task.wait(0.8)
-end
-
 local function doDance(o)
 	local _, hum = hrpOf()
 	if not hum then return false end
@@ -769,8 +835,7 @@ local function doDance(o)
 	if not (ok and res) then sendChat("/e dance") end
 	log("DANCE " .. o.secs .. "s")
 	task.wait(o.secs + 2)
-	stopEmote()
-	log("DANCE stopped")
+	exitEmote()
 	return true
 end
 
@@ -843,59 +908,22 @@ local function perform(o)
 end
 
 ---------------------------------------------------------------- per-goblin flow
-local skipPick = false -- set when the goblin only offers a difficulty that is switched off
-
--- what the goblin offers right now: { { i = choice index, d = "easy" }, ... }
-local function offered(m)
+local function pickByRemote(m)
 	local cfg = dialogCfg[m]
 	local node = cfg and cfg.dialog and cfg.dialog[1]
 	local ch = node and node.choices
-	local out = {}
-	if type(ch) ~= "table" then return out end
-	for i, c in ipairs(ch) do
-		if type(c) == "table" and c.callback then
-			local t = clean(tostring(c.arg or c.text)):lower()
-			for _, d in ipairs(DIFF) do
-				if t:find(d, 1, true) then
-					out[#out + 1] = { i = i, d = d }
-					break
-				end
+	if not (DI and ch) then return false end
+	local order = levelOrder()
+	for _, w in ipairs(order) do
+		for i, c in ipairs(ch) do
+			if c.callback and clean(tostring(c.arg or c.text)):lower():find(w, 1, true) then
+				log(("PICK %s -> DialogInteract(1, %d)"):format(w, i))
+				local ok, res = pcall(function() return DI:InvokeServer(1, i) end)
+				log("DialogInteract returned " .. tostring(ok) .. " " .. fmt(res))
+				return ok
 			end
 		end
 	end
-	return out
-end
-
-local function closeDialog()
-	for _, g in ipairs(texts(true)) do
-		local t = clean(g.Text):lower()
-		if t:find("nevermind", 1, true) or t:find("never mind", 1, true) then
-			local b = clickTarget(g)
-			if b then
-				log("CLOSE dialog via " .. press(b))
-				return true
-			end
-		end
-	end
-	return false
-end
-
-local function pickByRemote(m)
-	skipPick = false
-	if not DI then return false end
-	local list = offered(m)
-	if #list == 0 then return false end
-	learned[m.Name] = { d = list[1].d, at = os.clock() }
-	for _, o in ipairs(list) do
-		if CFG.allow[o.d] then
-			log(("PICK %s -> DialogInteract(1, %d)"):format(o.d, o.i))
-			local ok, res = pcall(function() return DI:InvokeServer(1, o.i) end)
-			log("DialogInteract returned " .. tostring(ok) .. " " .. fmt(res))
-			return ok
-		end
-	end
-	skipPick = true
-	log(("SKIP %s offers %s (switched off)"):format(m.Name, list[1].d))
 	return false
 end
 
@@ -915,6 +943,7 @@ local function turnIn(m)
 	setStatus("claim: " .. m.Name)
 	if not tpTo(m) then return false end
 	if not openDialog(m) then return false end
+	s.pos = m:GetPivot().Position
 	advance(5, false)
 	log("DONE " .. m.Name)
 	return true
@@ -929,16 +958,35 @@ local function handleGoblin(m, s)
 
 	local obj, raw
 	local cfg0 = dialogCfg[m]
+	if not (cfg0 and cfg0.cs_start) then
+		local ch = cfg0 and cfg0.dialog and cfg0.dialog[1] and cfg0.dialog[1].choices
+		if ch then
+			local lvs, ok = {}, false
+			for _, c in ipairs(ch) do
+				if c.callback and c.arg then
+					local lv = clean(tostring(c.arg)):lower()
+					lvs[#lvs + 1] = lv
+					if CFG.levels[lv] then ok = true end
+				end
+			end
+			local key = m.Name:lower()
+			if #lvs == 1 and diffByName[key] ~= lvs[1] then
+				diffByName[key] = lvs[1]
+				log("LEARN " .. m.Name .. " = " .. lvs[1])
+			end
+			if #lvs > 0 and not ok then
+				log("SKIP level " .. table.concat(lvs, "/") .. " (not selected) on " .. m.Name)
+				closeDialog()
+				return true
+			end
+		end
+	end
 	if cfg0 and cfg0.cs_start and cfg0.initial_data then
 		obj, raw = objFromCfg(m) -- quest already running
 		if obj then log("RESUME " .. raw) end
 	elseif pickByRemote(m) then
 		obj, raw = advance(5, true)
 		if not obj and openDialog(m) then obj, raw = objFromCfg(m) end
-	elseif skipPick then
-		skipPick = false
-		closeDialog()
-		return true
 	else
 		local btn, label = pickDifficulty()
 		if btn then
@@ -1038,11 +1086,11 @@ gui.Name = "GoblinAuto"
 gui.ResetOnSpawn = false
 gui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
 
-local function addButton(text, y, fn)
+local function addButton(text, y, fn, x)
 	local b = Instance.new("TextButton")
 	b.Size = UDim2.new(0, 140, 0, 38)
 	b.AnchorPoint = Vector2.new(1, 0)
-	b.Position = UDim2.new(1, -10, 0, y)
+	b.Position = UDim2.new(1, -(x or 10), 0, y)
 	b.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 	b.TextColor3 = Color3.new(1, 1, 1)
 	b.Text = text
@@ -1070,6 +1118,101 @@ addButton("Sweep now", 294, function()
 	lastSweep = -1000
 end)
 
+-- คอลัมน์ 2: เลือกระดับเควส
+local function paint(b, on)
+	b.BackgroundColor3 = on and Color3.fromRGB(30, 120, 60) or Color3.fromRGB(25, 25, 30)
+end
+for i, l in ipairs(DIFF) do
+	local function label() return (CFG.levels[l] and "[x] " or "[ ] ") .. l end
+	local btn = addButton(label(), 110 + (i - 1) * 46, function(b)
+		CFG.levels[l] = not CFG.levels[l]
+		b.Text = label()
+		paint(b, CFG.levels[l])
+	end, 156)
+	paint(btn, CFG.levels[l])
+end
+local talkBtn = addButton(CFG.talk and "Talk: ON" or "Talk: OFF", 340, function(b)
+	CFG.talk = not CFG.talk
+	b.Text = CFG.talk and "Talk: ON" or "Talk: OFF"
+	paint(b, CFG.talk)
+end, 156)
+paint(talkBtn, CFG.talk)
+
+-- คอลัมน์ 3: วาปไปเกาะ (goblin โหลดแล้ว Auto จะหยิบเอง)
+local function goTo(cf)
+	local hrp = hrpOf()
+	if not hrp then return false end
+	local p = cf.Position
+	pcall(function() lp:RequestStreamAroundAsync(p) end)
+	hrp.Anchored = true
+	hrp.CFrame = CFrame.new(p + Vector3.new(0, 150, 0))
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	task.wait(1.5)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	rp.FilterDescendantsInstances = { lp.Character }
+	local hit
+	for _ = 1, 8 do
+		hit = workspace:Raycast(p + Vector3.new(0, 400, 0), Vector3.new(0, -900, 0), rp)
+		if hit then break end
+		task.wait(0.5)
+	end
+	hrp.CFrame = CFrame.new(hit and (hit.Position + Vector3.new(0, 5, 0)) or (p + Vector3.new(0, 8, 0)))
+	hrp.Anchored = false
+	return true
+end
+
+local function goIsland(isl)
+	local cf = findIsland(isl)
+	if not cf then
+		log("NOTE: island not found: " .. isl[1] .. " - press Dump islands, or fill CFG.islandPos")
+		setStatus("no spot: " .. isl[1])
+		return
+	end
+	log("TP island " .. isl[1])
+	setStatus("tp: " .. isl[1])
+	goTo(cf)
+	setStatus("idle")
+end
+
+local function dumpIslands()
+	log("---- ISLAND DUMP ----")
+	for _, r in ipairs(islandRoots()) do
+		log("ROOT " .. r:GetFullName())
+		for i, o in ipairs(r:GetChildren()) do
+			if i > 80 then break end
+			local p = posOf(o)
+			log(("  %s | %s"):format(o.Name, p and ("%.0f, %.0f, %.0f"):format(p.X, p.Y, p.Z) or "no pos"))
+		end
+	end
+end
+
+local islandFrame = Instance.new("ScrollingFrame")
+islandFrame.Size = UDim2.new(0, 150, 0, 280)
+islandFrame.AnchorPoint = Vector2.new(1, 0)
+islandFrame.Position = UDim2.new(1, -302, 0, 110)
+islandFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+islandFrame.BackgroundTransparency = 0.5
+islandFrame.ScrollBarThickness = 4
+islandFrame.CanvasSize = UDim2.new(0, 0, 0, (#ISLANDS + 1) * 40 + 4)
+islandFrame.Parent = gui
+for i = 1, #ISLANDS + 1 do
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -10, 0, 36)
+	b.Position = UDim2.new(0, 4, 0, 4 + (i - 1) * 40)
+	b.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.TextSize = 14
+	b.Parent = islandFrame
+	if ISLANDS[i] then
+		b.Text = ISLANDS[i][1]
+		b.Activated:Connect(function() goIsland(ISLANDS[i]) end)
+	else
+		b.Text = "Dump islands"
+		b.Activated:Connect(dumpIslands)
+	end
+end
+
 statusLbl = Instance.new("TextLabel")
 statusLbl.Size = UDim2.new(0, 140, 0, 36)
 statusLbl.AnchorPoint = Vector2.new(1, 0)
@@ -1082,96 +1225,6 @@ statusLbl.TextWrapped = true
 statusLbl.Text = "idle"
 statusLbl.Parent = gui
 
--- difficulty toggles: [x] = take goblins that offer it. all off = talk to nobody
-for i, d in ipairs(DIFF) do
-	local name = d:sub(1, 1):upper() .. d:sub(2)
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0, 100, 0, 30)
-	b.AnchorPoint = Vector2.new(1, 0)
-	b.Position = UDim2.new(1, -160, 0, 110 + (i - 1) * 34)
-	b.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-	b.TextColor3 = Color3.new(1, 1, 1)
-	b.TextSize = 14
-	b.Parent = gui
-	local function paint() b.Text = (CFG.allow[d] and "[x] " or "[ ] ") .. name end
-	paint()
-	b.Activated:Connect(function()
-		CFG.allow[d] = not CFG.allow[d]
-		paint()
-		if CFG.allow[d] then sweepNow = true; lastSweep = -1000 end
-	end)
-end
-
--- warp panel: tap an island to teleport. Save mode ON + tap = remember where you stand
-local function warp(name)
-	local hrp = hrpOf()
-	if not hrp then return false end
-	local cf
-	if saved[name] then
-		cf = CFrame.new(saved[name])
-	else
-		cf = spotByName((name:match("^%S+") or name):lower())
-	end
-	if not cf then return false end
-	pcall(function() lp:RequestStreamAroundAsync(cf.Position) end)
-	hrp.CFrame = cf + Vector3.new(0, 4, 0)
-	hrp.AssemblyLinearVelocity = Vector3.zero
-	return true
-end
-
-local saveMode = false
-local sf = Instance.new("ScrollingFrame")
-sf.Size = UDim2.new(0, 140, 0, 230)
-sf.AnchorPoint = Vector2.new(1, 0)
-sf.Position = UDim2.new(1, -270, 0, 110)
-sf.BackgroundColor3 = Color3.new(0, 0, 0)
-sf.BackgroundTransparency = 0.5
-sf.BorderSizePixel = 0
-sf.ScrollBarThickness = 4
-sf.CanvasSize = UDim2.new(0, 0, 0, 0)
-sf.AutomaticCanvasSize = Enum.AutomaticSize.Y
-sf.Parent = gui
-local lay = Instance.new("UIListLayout")
-lay.Padding = UDim.new(0, 4)
-lay.SortOrder = Enum.SortOrder.LayoutOrder
-lay.Parent = sf
-
-local function wbtn(text, order, fn)
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(1, -8, 0, 30)
-	b.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-	b.TextColor3 = Color3.new(1, 1, 1)
-	b.TextSize = 13
-	b.Text = text
-	b.LayoutOrder = order
-	b.Parent = sf
-	b.Activated:Connect(function() fn(b) end)
-	return b
-end
-
-wbtn("Save mode: OFF", 0, function(b)
-	saveMode = not saveMode
-	b.Text = saveMode and "Save mode: ON" or "Save mode: OFF"
-end)
-
-for i, name in ipairs(ISLANDS) do
-	local b
-	local function paint() b.Text = (saved[name] and "+ " or "- ") .. name end
-	b = wbtn("", i, function()
-		if saveMode then
-			local hrp = hrpOf()
-			if not hrp then return end
-			saved[name] = hrp.Position
-			saveSpots()
-			log("SAVED " .. name)
-			paint()
-		elseif not warp(name) then
-			setStatus("no spot saved: " .. name)
-		end
-	end)
-	paint()
-end
-
 genv.GoblinAutoStop = function()
 	running = false
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
@@ -1182,19 +1235,20 @@ end
 
 ---------------------------------------------------------------- main loop
 conns[#conns + 1] = lp.CharacterAdded:Connect(function()
-	sweepNow = true; lastSweep = -1000
+	sweepNow = true
 end)
 
 task.spawn(function()
 	while running do
-		if enabled and anyAllowed() and hrpOf() then
+		if enabled and hrpOf() then
 			local list = fresh()
 			local now = os.clock()
 			if #list == 0 and CFG.sweep
-				and ((sweepNow and now - lastSweep > 20) or now - lastSweep > CFG.sweepEvery) then
+				and ((sweepNow and now - lastSweep > 120) or now - lastSweep > CFG.sweepEvery) then
 				sweepNow = false
 				lastSweep = now
 				local ok, err = pcall(sweepOnce)
+				lastSweep = os.clock() -- นับเวลาจากตอนจบ sweep
 				if not ok then log("ERR sweep " .. tostring(err)) end
 				local h = hrpOf()
 				if h then h.Anchored = false end
@@ -1222,7 +1276,7 @@ task.spawn(function()
 						elseif res then
 							s.done = true
 							s.at = os.clock()
-						end
+							end
 					end
 				end
 			end
