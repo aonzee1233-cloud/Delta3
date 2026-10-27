@@ -1669,7 +1669,6 @@ local function sweepOnce()
 	for _, h in ipairs(hints) do order[#order + 1] = { name = "hint", cf = h } end
 	table.clear(hints)
 	sweepAbort = false
-	for _, s in ipairs(sweepSpots()) do order[#order + 1] = s end
 	if #order == 0 then
 		log("NOTE: no island spots (workspace.world.spawns.TpSpots) - fill CFG.extraSpots")
 		return false
@@ -1964,8 +1963,7 @@ end
 
 local function sweepDue(now)
 	if not CFG.sweep or not CFG.talk or #levelOrder() == 0 then return false end
-	if sweepNow and now - lastSweep > CFG.sweepGap then return true end
-	return now - lastSweep > CFG.sweepEvery
+	return #hints > 0 and now - lastSweep > CFG.sweepGap
 end
 
 -- เควสค้างอยู่ (โดน recover / lag / วาปตัดกลางทาง): กลับไปทำต่อจาก HUD ก่อน ห้ามไป sweep
