@@ -1,5 +1,5 @@
 --[[
-Goblin Auto v4 | Fisch - FischFright 3 | Delta
+Goblin Auto v10 | Fisch - FischFright 3 | Delta
 Run it once while the event is on. Re-running replaces the previous instance.
 
 Flow per goblin (nearest first):
@@ -8,17 +8,18 @@ TP -> Talk -> pick difficulty -> read objective -> do it -> TP back -> Talk -> c
 Auto objectives : type in chat, dance, jump, walk
 Skipped + logged: catch / perfect catch / drown / burn / freeze / trick-or-treat / guess / insult
 
-What changed vs v3
- * Goblins on other islands: the "done/tries" flags were stuck on the goblin model, so a
-   goblin that respawned somewhere else was ignored. State now resets when a goblin moves.
-   Goblins that are not streamed in are searched for with an island sweep (TpSpots), which
-   runs when a goblin spawn event fires, or every CFG.sweepEvery seconds.
- * Teleports but does not talk: waits for the prompt, fires it up to 4 times and confirms
-   with the dialogstart event before continuing.
- * Random UIs (shop / backpack / timers): the baseline is per UI instance now (the ticking
-   "time left" label no longer counts as new), clicks are limited to the dialog container,
-   and HUD / timer / icon texts are ignored.
- * Objective parser bug: "Jump 50 times (0/50)" was read as 15.
+What changed vs v9 (self-heal)
+ * No more standing still after a quest ends or is skipped: the old code waited up to 120s
+   before looking for the next goblin. Now every goblin outcome (done / skipped / failed /
+   error) triggers a sweep within CFG.sweepGap seconds, and idle sweeps run every CFG.sweepEvery.
+ * A goblin that keeps failing is put on a cooldown (40s, 80s, 160s ... max 300s) and the bot
+   goes to other goblins instead of retrying the same one forever.
+ * Supervisor thread: restarts a dead / hung loop, unfreezes anchored / sitting / ragdolled
+   characters, closes a dialog left open, forces a sweep when nothing happened for
+   CFG.idleLimit seconds, teleports to Moosewood if stuck or out of the world, and as a last
+   resort respawns the character (CFG.hardResetAfter).
+ * Dying during any objective (not only walking) is detected and the try is refunded.
+ * New button: Fix now (runs the same repair by hand).
 
 Buttons: Auto ON/OFF | Copy report | Clear | Dump UI | Sweep now
 If something still fails: open the dialog by hand, press Dump UI, then Copy report.
@@ -48,15 +49,17 @@ local CFG = {
 	useDisplayName = false,  -- fills <player> if it ever shows up literally in a sentence
 	resumeActive = true,     -- if a goblin quest is already active, do it instead of failing
 	sweep = true,            -- visit the event islands to find goblins that are not loaded
-	sweepTp = true, -- true = ถ้า stream ไม่เจอ ค่อยวาปไล่เกาะแบบเดิม | false = ไม่วาปเลย
-	sweepEvery = 120,        -- seconds between sweeps while no goblin is around
+	sweepEvery = 20,         -- seconds between idle sweeps while no goblin is around
 	sweepWait = 2.5,         -- seconds to wait on each island for things to stream in
+	sweepGap = 6,            -- min seconds between two sweeps when a quest just ended / a goblin event fired
 	retryAfter = 300,        -- a finished goblin that stays in place is retried after this long
 	extraSpots = {},         -- optional: { { name = "Island", pos = Vector3.new(x, y, z) } }
 	talk = true,             -- false = ไม่คุยกับ goblin เลย
 	levels = { easy = true, normal = false, hard = false, extreme = false, ultimate = false },
 	watchdog = true,
-	wdKick = 60, -- goblin รออยู่แต่เงียบเกินกี่วินาที -> ดึงกลับ
+	idleLimit = 40,          -- ไม่มีงานทำเกินกี่วินาที -> บังคับ sweep หา goblin
+	failCool = 40,           -- goblin ที่ทำไม่สำเร็จครบ 4 ครั้ง พักกี่วินาที (x2 ทุกรอบ สูงสุด 300) แล้วไปหาตัวอื่นก่อน
+	hardResetAfter = 4,      -- ซ่อมแบบเบากี่รอบติดแล้วยังไม่หาย -> รีเซ็ตตัวละคร (0 = ปิด)
 	islandPos = {
 		["Moosewood"]       = Vector3.new(380, 135, 234),
 		["Roslit Bay"]      = Vector3.new(-1473, 133, 708),
@@ -83,6 +86,9 @@ local sweepNow = true
 local lastSweep = -1000
 local dialogRoot = nil
 local statusLbl = nil
+local working = false         -- true while a goblin / sweep is being processed
+local lastWork = os.clock()   -- last time the loop did something real
+local recoverNow = nil        -- set by the supervisor (used by the Fix now button)
 
 -- watchdog: ทุก step ใหญ่เรียก touch() ถ้าเงียบเกิน limit วินาที = ค้าง
 local wd = { beat = os.clock(), limit = 60 }
@@ -395,15 +401,17 @@ local MAXTRY = 4
 local function stOf(m)
 	local pos = m:GetPivot().Position
 	local s = state[m]
+	local strikes = 0
 	if s then
 		local age = os.clock() - s.at
 		local moved = (s.pos - pos).Magnitude > 25
 		local expired = (s.done and age > CFG.retryAfter)
-			or (not s.done and s.tries >= MAXTRY and age > 40)
+			or (not s.done and s.tries >= MAXTRY and age > (s.cool or 40))
+		if expired and not moved then strikes = s.strikes or 0 end
 		if moved or expired then s = nil end -- respawned somewhere else / cooldown over
 	end
 	if not s then
-		s = { pos = pos, tries = 0, done = false, claim = false, at = os.clock() }
+		s = { pos = pos, tries = 0, done = false, claim = false, at = os.clock(), strikes = strikes }
 		state[m] = s
 	end
 	return s
@@ -1508,7 +1516,7 @@ local function sweepSpots()
 	return spots
 end
 
-local function sweepTp()
+local function sweepOnce()
 	local order = {}
 	for _, h in ipairs(hints) do order[#order + 1] = { name = "hint", cf = h } end
 	table.clear(hints)
@@ -1520,8 +1528,9 @@ local function sweepTp()
 	log("SWEEP " .. #order .. " spots")
 	for _, s in ipairs(order) do
 		if not running or not enabled then return false end
-		local hrp = hrpOf()
-		if not hrp then return false end
+		local hrp, hum = hrpOf()
+		if not hrp or not hum or hum.Health <= 0 then return false end
+		lastWork = os.clock()
 		setStatus("looking: " .. s.name)
 		pcall(function() lp:RequestStreamAroundAsync(s.cf.Position) end)
 		hrp.CFrame = s.cf + Vector3.new(0, 8, 0)
@@ -1544,35 +1553,6 @@ local function sweepTp()
 		end
 	end
 	log("SWEEP done, nothing found")
-	return false
-end
-
-
--- รอบแรกไม่ขยับตัวละคร: ขอให้เกม stream พื้นที่แต่ละเกาะมาให้ แล้วดูว่า goblin โผล่ไหม
-local function sweepOnce()
-	local order = {}
-	for _, h in ipairs(hints) do order[#order + 1] = { name = "hint", cf = h } end
-	for _, s in ipairs(sweepSpots()) do order[#order + 1] = s end
-	log("SWEEP stream " .. #order .. " spots")
-	for _, s in ipairs(order) do
-		if not running or not enabled then return false end
-		setStatus("scan: " .. s.name)
-		pcall(function() lp:RequestStreamAroundAsync(s.cf.Position, 4) end)
-		local t0 = os.clock()
-		while os.clock() - t0 < 1.2 do
-			if #fresh() > 0 then
-				table.clear(hints)
-				log("FOUND goblins near " .. s.name .. " (stream)")
-				return true
-			end
-			task.wait(0.3)
-		end
-	end
-	if CFG.sweepTp then
-		log("SWEEP stream found nothing - fallback to teleport sweep")
-		return sweepTp()
-	end
-	log("SWEEP stream found nothing")
 	return false
 end
 
@@ -1625,6 +1605,9 @@ addButton("Dump UI", 248, function() dumpUI() end)
 addButton("Sweep now", 294, function()
 	sweepNow = true
 	lastSweep = -1000
+end)
+addButton("Fix now", 386, function()
+	if recoverNow then task.spawn(recoverNow, "manual (Fix now button)") end
 end)
 
 -- คอลัมน์ 2: เลือกระดับเควส
@@ -1760,22 +1743,23 @@ genv.GoblinAutoStop = function()
 	gui:Destroy()
 end
 
----------------------------------------------------------------- main loop
-conns[#conns + 1] = lp.CharacterAdded:Connect(function()
-	sweepNow = true
-end)
-
----------------------------------------------------------------- main loop + watchdog
+---------------------------------------------------------------- main loop + self-heal
 local loopThread
-local lastWork = os.clock() -- ครั้งสุดท้ายที่ loop เข้าไปทำงานกับ goblin จริงๆ
+local heal = { fails = 0, lastFix = 0 } -- consecutive repairs that did not lead to progress
 
--- ปลดทุกอย่างที่อาจค้าง: anchor, bind เดิน, emote, dialog
+local function activity() lastWork = os.clock() end
+
+-- ปลดทุกอย่างที่อาจค้าง: anchor, bind เดิน, emote, dialog, สถานะตัวละคร
 local function unstick(why)
-	log("WATCHDOG unstick: " .. why)
+	log("HEAL unstick: " .. why)
 	pcall(function() RunService:UnbindFromRenderStep("GA_walk") end)
 	local h, hum = hrpOf()
 	if h then pcall(function() h.Anchored = false end) end
-	if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
+	if hum then
+		pcall(function() hum:Move(Vector3.zero, false) end)
+		pcall(function() hum.PlatformStand = false end)
+		pcall(function() hum.Sit = false end)
+	end
 	dialogRoot = nil
 	pcall(closeDialog)
 	pcall(cancelEmote)
@@ -1797,20 +1781,52 @@ end
 
 local function refundTries()
 	for _, st in pairs(state) do
-		if not st.done then st.tries = 0 end
+		if not st.done then
+			st.tries = 0
+			st.cool = nil
+		end
 	end
+end
+
+-- stand on ground that is known to exist (Moosewood) when stuck in geometry / out of the world
+local function safeTeleport()
+	local p = CFG.islandPos["Moosewood"]
+	if not p then return end
+	pcall(goTo, CFrame.new(p))
+	local h = hrpOf()
+	if h then pcall(function() h.Anchored = false end) end
+end
+
+-- goblin failed this try; after MAXTRY tries it rests for a while (longer each time)
+local function noteFail(s)
+	s.at = os.clock()
+	if s.tries >= MAXTRY then
+		s.strikes = (s.strikes or 0) + 1
+		s.cool = math.min(CFG.failCool * 2 ^ (s.strikes - 1), 300)
+		log(("GIVE UP on this goblin for %ds (strike %d) - going to look for others"):format(
+			math.floor(s.cool), s.strikes))
+	end
+end
+
+local function sweepDue(now)
+	if not CFG.sweep or not CFG.talk or #levelOrder() == 0 then return false end
+	if sweepNow and now - lastSweep > CFG.sweepGap then return true end
+	return now - lastSweep > CFG.sweepEvery
 end
 
 local function tickOnce()
 	local list = fresh()
 	local now = os.clock()
-	if #list == 0 and CFG.sweep
-		and ((sweepNow and not pending() and now - lastSweep > 120) or now - lastSweep > CFG.sweepEvery) then
+	if #list == 0 and sweepDue(now) then
 		sweepNow = false
 		lastSweep = now
+		working = true
+		activity()
 		touch(150)
 		local ok, err = pcall(sweepOnce)
+		working = false
 		lastSweep = os.clock() -- นับเวลาจากตอนจบ sweep
+		activity()
 		if not ok then log("ERR sweep " .. tostring(err)) end
 		local h = hrpOf()
 		if h then h.Anchored = false end
@@ -1832,22 +1848,30 @@ local function tickOnce()
 			if okS and not s.done and s.tries < MAXTRY then
 				s.tries = s.tries + 1
 				s.at = os.clock()
-				lastWork = os.clock()
+				working = true
+				activity()
 				lastDied = false
 				touch(90)
+				local char0 = lp.Character
 				local ok, res = pcall(handleGoblin, m, s)
-				lastWork = os.clock()
+				working = false
+				activity()
 				if not ok then
 					log("ERR " .. tostring(res))
 					unstick("error in handleGoblin")
-				elseif lastDied then
+					noteFail(s)
+				elseif lastDied or lp.Character ~= char0 then
 					lastDied = false
 					s.tries = math.max(0, s.tries - 1) -- ตายไม่นับเป็นความพยายาม
 					waitAlive(25)
 				elseif res then
-					s.done = true
+					s.done = true -- done OR skipped (a quest we cannot do): either way, move on
 					s.at = os.clock()
+					heal.fails = 0
+				else
+					noteFail(s)
 				end
+				sweepNow = true -- whatever happened: go look for the next goblin right away
 			end
 		end
 	end
@@ -1857,13 +1881,16 @@ end
 local function startLoop()
 	if loopThread then pcall(task.cancel, loopThread) end
 	touch(60)
-	lastWork = os.clock()
+	working = false
+	activity()
 	loopThread = task.spawn(function()
 		while running do
-			if enabled and hrpOf() then
+			local h, hum = hrpOf()
+			if enabled and h and hum and hum.Health > 0 then
 				local ok, err = pcall(tickOnce)
 				if not ok then
 					log("ERR loop " .. tostring(err))
+					working = false
 					unstick("loop error")
 				end
 			end
@@ -1871,28 +1898,116 @@ local function startLoop()
 		end
 	end)
 end
+
+-- full repair, escalating: restart loop -> + teleport to safe ground -> + respawn character
+local function recover(why)
+	local now = os.clock()
+	if now - heal.lastFix > 300 then heal.fails = 0 end
+	heal.lastFix = now
+	heal.fails = heal.fails + 1
+	log(("HEAL #%d: %s"):format(heal.fails, why))
+	if loopThread then pcall(task.cancel, loopThread) end
+	working = false
+	unstick(why)
+	refundTries()
+	sweepNow = true
+	lastSweep = -1000
+	if heal.fails >= 2 then pcall(safeTeleport) end
+	if CFG.hardResetAfter > 0 and heal.fails >= CFG.hardResetAfter then
+		heal.fails = 0
+		log("HEAL hard reset: respawning the character")
+		local _, hum = hrpOf()
+		if hum then pcall(function() hum.Health = 0 end) end
+		waitAlive(30)
+	end
+	startLoop()
+end
+recoverNow = recover
+
+conns[#conns + 1] = lp.CharacterAdded:Connect(function()
+	sweepNow = true
+	lastSweep = -1000
+	dialogRoot = nil
+	task.delay(3, function()
+		if running and not working then pcall(unstick, "respawned") end
+	end)
+end)
+
 startLoop()
 
--- watchdog: loop ค้าง / ตาย / goblin รออยู่แต่ไม่มีใครทำอะไร -> ปลด + เริ่มใหม่ + ดึงกลับไปหา goblin
+-- supervisor: runs on its own thread, so it still works when the main loop is hung or dead
 task.spawn(function()
+	local anchoredSince, seatedSince
 	while running do
-		task.wait(3)
-		if CFG.watchdog and enabled and hrpOf() then
-			local now = os.clock()
-			local dead = loopThread ~= nil and coroutine.status(loopThread) == "dead"
-			if dead or now - wd.beat > wd.limit then
-				log(("WATCHDOG %s (%.0fs, status=%s)"):format(dead and "loop dead" or "hung",
-					now - wd.beat, statusLbl and statusLbl.Text or "?"))
-				unstick("restart loop")
-				refundTries()
-				sweepNow = true
-				startLoop()
-			elseif now - lastWork > CFG.wdKick and pending() then
-				log("WATCHDOG kick: goblin waiting, idle " .. CFG.wdKick .. "s")
-				unstick("idle kick")
-				refundTries()
-				lastWork = now
-			end
+		task.wait(2)
+		if CFG.watchdog and enabled then
+			local ok, err = pcall(function()
+				local now = os.clock()
+
+				-- 1) loop thread is dead
+				if loopThread ~= nil and coroutine.status(loopThread) == "dead" then
+					recover("loop thread died")
+					return
+				end
+
+				-- no character / dead: the game is respawning us, that is not a hang
+				local h, hum = hrpOf()
+				if not h or not hum or hum.Health <= 0 then
+					touch(60)
+					anchoredSince, seatedSince = nil, nil
+					return
+				end
+
+				-- 2) loop is alive but has not reported in for too long
+				if now - wd.beat > wd.limit then
+					recover(("loop hung %ds at: %s"):format(math.floor(now - wd.beat),
+						statusLbl and statusLbl.Text or "?"))
+					return
+				end
+
+				-- 3) fell out of the world
+				if h.Position.Y < -50 then
+					recover("fell out of the world")
+					return
+				end
+
+				-- 4) frozen / sitting / ragdolled for too long
+				if h.Anchored then
+					anchoredSince = anchoredSince or now
+					if now - anchoredSince > 15 then
+						h.Anchored = false
+						anchoredSince = nil
+						log("HEAL: character was frozen (anchored) for 15s -> released")
+					end
+				else
+					anchoredSince = nil
+				end
+				if hum.PlatformStand or hum.Sit then
+					seatedSince = seatedSince or now
+					if now - seatedSince > 6 then
+						hum.PlatformStand = false
+						hum.Sit = false
+						hum.Jump = true
+						seatedSince = nil
+						log("HEAL: character was sitting / ragdolled -> stood up")
+					end
+				else
+					seatedSince = nil
+				end
+
+				-- 5) nothing happened for a long time: close any dialog and look for goblins now
+				if not working and CFG.sweep and CFG.talk and #levelOrder() > 0
+					and now - lastWork > CFG.idleLimit then
+					log(("HEAL: idle %ds -> closing dialog + sweeping now"):format(math.floor(now - lastWork)))
+					lastWork = now
+					sweepNow = true
+					lastSweep = -1000
+					dialogRoot = nil
+					pcall(closeDialog)
+					pcall(cancelEmote)
+				end
+			end)
+			if not ok then log("ERR supervisor " .. tostring(err)) end
 		end
 	end
 end)
@@ -1916,4 +2031,4 @@ do
 	end
 	log("EMOTE REMOTES: " .. table.concat(names, ", "))
 end
-log("READY v4 | difficulty=" .. CFG.difficulty .. " | waiting for goblins")
+log("READY v10 | difficulty=" .. CFG.difficulty .. " | waiting for goblins")
