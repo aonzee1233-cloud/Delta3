@@ -570,22 +570,33 @@ local function noticeGoblin(src, text)
 	if not running then return end
 	text = clean(text)
 	local low = text:lower()
-	local now = os.clock()
-	if lastNote[low] and now - lastNote[low] < 8 then return end
-	lastNote[low] = now
-	local named
-	for _, isl in ipairs(ISLANDS) do
-		for i = 2, #isl do
-			if low:find(isl[i], 1, true) then
-				local cf = findIsland(isl)
-				if cf then hints[#hints + 1] = cf; named = isl[1] end
+	-- เอาเฉพาะประกาศ เช่น "Goblins have spawned at Lost Jungle!" (กันข้อความอื่นที่มีคำว่า goblin เช่นชื่อปลา)
+	if not (low:find("goblin", 1, true) and low:find("spawn", 1, true)) then return end
+	local isl
+	for _, it in ipairs(ISLANDS) do
+		for i = 2, #it do
+			if low:find(it[i], 1, true) then
+				isl = it
 				break
 			end
 		end
+		if isl then break end
 	end
-	log(("GOBLIN-MSG [%s] %s -> %s"):format(src, text:sub(1, 120), named or "no island named"))
+	local now = os.clock()
+	local key = isl and isl[1] or low
+	if lastNote[key] and now - lastNote[key] < 20 then return end
+	lastNote[key] = now
+	local cf = isl and findIsland(isl)
+	if cf then
+		hints[#hints + 1] = cf
+		for k = 0, 5 do -- 6 จุดรอบเกาะ เผื่อ goblin อยู่ไกลจากจุดกลาง
+			local a = math.rad(k * 60)
+			hints[#hints + 1] = cf + Vector3.new(math.cos(a) * 300, 0, math.sin(a) * 300)
+		end
+	end
+	log(("GOBLIN-MSG [%s] %s -> %s"):format(src, text:sub(1, 120), cf and isl[1] or "no island named"))
 	sweepNow = true
-	if named then
+	if cf then
 		lastSweep = -1000
 		sweepAbort = true
 	end
@@ -635,7 +646,8 @@ end
 local function watchRemote(r)
 	if not r:IsA("BaseRemoteEvent") then return end
 	local path = r:GetFullName()
-	if noisy(path) or path:find("Goblins/", 1, true) or r.Name == "dialogstart" then return end
+	if noisy(path) or path:find("Goblins/", 1, true) or r.Name == "dialogstart"
+		or r.Name == "Set" or r.Name == "ArrayUpdate" then return end
 	conns[#conns + 1] = r.OnClientEvent:Connect(function(...)
 		local t = table.pack(...)
 		local out = {}
@@ -1680,7 +1692,7 @@ local function sweepOnce()
 		hrp.Anchored = true -- do not fall while the ground streams in
 		local found = false
 		local t0 = os.clock()
-		while os.clock() - t0 < (s.name == "hint" and 4 or CFG.sweepWait) do
+		while os.clock() - t0 < (s.name == "hint" and 2 or CFG.sweepWait) do
 			task.wait(0.15)
 			if #fresh() > 0 then
 				found = true
