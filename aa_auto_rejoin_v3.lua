@@ -1,8 +1,9 @@
 -- Auto Rejoin v3 (เบา ไม่เกะกะ): เน็ตหลุด / โดนเตะ / เซิร์ฟล่ม -> เข้าเกมใหม่เอง (ใช้ได้กับทุกแมพ ทุกเกม)
 -- v3: แก้ตอนหลุดกลางแมตช์ (อยู่คนละแมพกับหน้าหลัก เช่น Anime Adventures ในด่าน) ให้ไปล็อบบี้ด้วยวิธีเดียวกับที่ใช้ได้ในล็อบบี้ก่อน
---     ลดเวลารอที่ค้างต่อวิธี (60 -> 30 วิ) · เพิ่มวิธีสำรอง TeleportAsync · เพิ่ม log ให้เห็นว่าติดขั้นไหน (กดปุ่ม "คัดลอก log")
+--     ลดเวลารอที่ค้างต่อวิธี (60 -> 30 วิ) · เพิ่ม log ให้เห็นว่าติดขั้นไหน (กดปุ่ม "คัดลอก log")
 --     เม็ดยาโชว์ขั้นตอนสด ๆ ตอนรีจอย (หาเซิร์ฟ / รอ Roblox กี่วิ / Roblox ตอบอะไร) · ค้นหาเซิร์ฟมีเวลาตัดไม่ให้ค้าง
 --     v3.2: มีป้ายเวอร์ชันท้ายบรรทัด "ไป:" บนเม็ดยา · ถ้าโค้ดรีจอยพังกลางทางจะขึ้น error แทนค้างเงียบ
+--     v3.3: เอา TeleportAsync ออก (Roblox ให้เรียกได้จากเซิร์ฟเวอร์เท่านั้น) · ปุ่มทดสอบลองรอบเดียวแล้วจบ ไม่ค้างโหมดรีจอย
 --     (ถ้าก๊อป aa_rejoin.lua ไว้ใน autoexec ต้องเอาตัวใหม่ไปทับ ไม่งั้นจะรันตัวเก่า)
 --   1) เฝ้าหน้าต่างแจ้งหลุดของ Roblox แล้วแยกสาเหตุ (เน็ต / เซิร์ฟปิด / โดนเตะ / บัญชีเข้าซ้ำ / แบน) ตัดสินใจเอง
 --   2) รอเน็ตกลับก่อนค่อยสั่งเข้า · หาเซิร์ฟสาธารณะที่ยังว่างถ้าเซิร์ฟเดิมเข้าไม่ได้ · จับเกมค้าง · กันวนลูป
@@ -27,7 +28,7 @@ local CFG = {
     ONLINE_WAIT       = 180,   -- รอเน็ตกลับสูงสุดกี่วินาทีก่อนสั่งเข้า (เกินแล้วลองสั่งเข้าเลย)
     STUCK_SECONDS     = 30,    -- สั่งวาร์ปแล้วยังไม่ไปภายในกี่วินาที ถือว่าค้าง ลองวิธีถัดไป
     BUTTON_WAIT       = 10,    -- กดปุ่ม Reconnect บนหน้าต่างหลุดแล้วรอกี่วินาทีก่อนลองวิธีถัดไป
-    NO_REPLY_SECONDS  = 12,    -- (ตอนอยู่ในแมตช์) สั่งวาร์ปแล้ว Roblox เงียบสนิท ไม่เริ่มวาร์ป ไม่ฟ้อง error ภายในกี่วินาที ให้ข้ามไปวิธีถัดไปเลย
+    NO_REPLY_SECONDS  = 15,    -- (ตอนอยู่ในแมตช์) สั่งวาร์ปแล้ว Roblox เงียบสนิท ไม่เริ่มวาร์ป ไม่ฟ้อง error ภายในกี่วินาที ให้ข้ามไปวิธีถัดไปเลย
     FIND_TIMEOUT      = 8,     -- ค้นหาเซิร์ฟที่ว่างนานเกินกี่วินาทีให้เลิก แล้วใช้เซิร์ฟสุ่มแทน (กันค้างตอน API ช้า)
     NO_CHAR_SECONDS   = 240,   -- ไม่มีตัวละครนานเกินนี้ถือว่าเกมค้าง รีจอย (ตั้ง 0 = ปิด ใช้กับเกมที่ไม่มีตัวละคร)
     LOOP_LIMIT        = 5,     -- หลุดกี่ครั้งภายใน LOOP_WINDOW ถึงถือว่า "ติดลูป"
@@ -45,7 +46,7 @@ local CFG = {
 
 local FILE        = "aa_rejoin.lua"
 local STATE_FILE  = "aa_rejoin_state.json"
-local VERSION     = "v3.2"   -- โชว์ท้ายบรรทัด "ไป:" บนเม็ดยา ไว้เช็คว่ารันตัวใหม่จริงไหม
+local VERSION     = "v3.3"   -- โชว์ท้ายบรรทัด "ไป:" บนเม็ดยา ไว้เช็คว่ารันตัวใหม่จริงไหม
 
 local Players      = game:GetService("Players")
 local TS           = game:GetService("TeleportService")
@@ -1229,6 +1230,9 @@ local function reconnect(info, opts)
     else
         pushEvent(opts.test and "ทดสอบ" or "รีจอยเอง", why)
         log(opts.test and "ทดสอบ: จะวาร์ปจริงตามเป้าหมายรีจอย" or ("รีจอยเอง: " .. why))
+        if opts.test then
+            log("หมายเหตุ: ปุ่มทดสอบสั่งวาร์ปตอนที่ยังต่อเซิร์ฟอยู่ ซึ่งไม่เหมือนตอนหลุดจริง (ตอนนั้นเน็ตขาดแล้ว) ผลอาจต่างกัน")
+        end
     end
 
     -- สคิปฟาร์มที่อยากให้รันหลังรีจอย: ฝากไว้ในคิวของการวาร์ปครั้งถัดไป (ครั้งเดียวต่อการหลุด)
@@ -1255,7 +1259,7 @@ local function reconnect(info, opts)
 
         -- ลำดับวิธีเข้า (แล้ววนซ้ำวิธีที่ไม่ใช่ "same" ไปเรื่อยๆ)
         --   อยู่หน้าหลัก/ล็อบบี้ (เป้าหมาย = แมพที่อยู่): เซิร์ฟเดิม -> สุ่มเซิร์ฟ -> เซิร์ฟที่ว่าง
-        --   อยู่ในแมตช์ (เป้าหมาย = ล็อบบี้ คนละแมพ):     เซิร์ฟที่ว่าง -> สุ่มเซิร์ฟ -> TeleportAsync
+        --   อยู่ในแมตช์ (เป้าหมาย = ล็อบบี้ คนละแมพ):     เซิร์ฟที่ว่าง -> สุ่มเซิร์ฟ
         --   (ในแมตช์เริ่มที่ "เซิร์ฟที่ว่าง" เพราะใช้คำสั่งตัวเดียวกับ "เซิร์ฟเดิม" ที่ทดสอบแล้วว่าใช้ได้ในล็อบบี้)
         local target0 = resolveTarget()
         local inMatch = target0 ~= game.PlaceId
@@ -1263,7 +1267,6 @@ local function reconnect(info, opts)
         if inMatch then
             if CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
             plan[#plan + 1] = "any"
-            plan[#plan + 1] = "async"
         else
             if CFG.TRY_SAME_SERVER and not info.nosame and game.JobId ~= "" then
                 plan[#plan + 1] = "same"
@@ -1297,8 +1300,7 @@ local function reconnect(info, opts)
                 local target, how = resolveTarget()
                 local m = plan[attempt]
                 if not m then m = cycle[((attempt - #plan - 1) % #cycle) + 1] end
-                local mlabel = (m == "same" and "เซิร์ฟเดิม") or (m == "open" and "เซิร์ฟที่ว่าง")
-                    or (m == "async" and "TeleportAsync") or "เซิร์ฟสุ่ม"
+                local mlabel = (m == "same" and "เซิร์ฟเดิม") or (m == "open" and "เซิร์ฟที่ว่าง") or "เซิร์ฟสุ่ม"
                 local head = "ครั้งที่ " .. attempt .. " · " .. mlabel
                 UI.set("หลุด! กำลังเข้าใหม่", COL.bad, head .. " · " .. target .. " (" .. how .. ")")
                 RT.tpFailed, RT.tpFailName, RT.tpState = false, nil, nil
@@ -1328,16 +1330,6 @@ local function reconnect(info, opts)
                         log("หาเซิร์ฟที่ว่างไม่ได้ (" .. tostring(why2) .. ") ใช้เซิร์ฟสุ่มแทน")
                         ok, err = pcall(function() TS:Teleport(target, lp) end)
                     end
-                elseif m == "async" then
-                    -- TeleportAsync รอผลนาน จึงแยกเธรด ไม่ให้ตัวนับค้างหยุดรอ
-                    ok = true
-                    task.spawn(function()
-                        local ok2, err2 = pcall(function() return TS:TeleportAsync(target, { lp }) end)
-                        if not ok2 then
-                            RT.tpFailed = true
-                            log("TeleportAsync ผิดพลาด:", tostring(err2))
-                        end
-                    end)
                 else
                     ok, err = pcall(function() TS:Teleport(target, lp) end)
                 end
@@ -1376,6 +1368,17 @@ local function reconnect(info, opts)
                     click(b)
                     task.wait(CFG.BUTTON_WAIT)
                 end
+            end
+
+            -- ปุ่มทดสอบ: ลองครบทุกวิธีรอบเดียวแล้วจบ (ไม่วนไปเรื่อยๆ จนค้างโหมดรีจอย)
+            if opts.test and attempt >= #plan then
+                log("ทดสอบจบ: ลองครบทุกวิธีแล้วแต่ยังไม่ได้วาร์ป (ตอนทดสอบยังต่อเซิร์ฟอยู่ อาจไม่เหมือนตอนหลุดจริง ให้ลองปิดไวไฟแทน)")
+                pushEvent("ทดสอบจบ", "ยังไม่ได้วาร์ป")
+                S.disconnectAt, S.pending = nil, nil
+                saveState()
+                UI.set("เฝ้าดูการหลุดอยู่", COL.ok, "ทดสอบจบ · ลองปิดไวไฟเพื่อทดสอบหลุดจริง")
+                RT.rejoining = false
+                return
             end
 
             if RT.auto then
