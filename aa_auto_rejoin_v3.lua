@@ -1,6 +1,7 @@
 -- Auto Rejoin v3 (เบา ไม่เกะกะ): เน็ตหลุด / โดนเตะ / เซิร์ฟล่ม -> เข้าเกมใหม่เอง (ใช้ได้กับทุกแมพ ทุกเกม)
 -- v3: แก้ตอนหลุดกลางแมตช์ (อยู่คนละแมพกับหน้าหลัก เช่น Anime Adventures ในด่าน) ให้ไปล็อบบี้ด้วยวิธีเดียวกับที่ใช้ได้ในล็อบบี้ก่อน
 --     ลดเวลารอที่ค้างต่อวิธี (60 -> 30 วิ) · เพิ่มวิธีสำรอง TeleportAsync · เพิ่ม log ให้เห็นว่าติดขั้นไหน (กดปุ่ม "คัดลอก log")
+--     เม็ดยาโชว์ขั้นตอนสด ๆ ตอนรีจอย (หาเซิร์ฟ / รอ Roblox กี่วิ / Roblox ตอบอะไร) · ค้นหาเซิร์ฟมีเวลาตัดไม่ให้ค้าง
 --   1) เฝ้าหน้าต่างแจ้งหลุดของ Roblox แล้วแยกสาเหตุ (เน็ต / เซิร์ฟปิด / โดนเตะ / บัญชีเข้าซ้ำ / แบน) ตัดสินใจเอง
 --   2) รอเน็ตกลับก่อนค่อยสั่งเข้า · หาเซิร์ฟสาธารณะที่ยังว่างถ้าเซิร์ฟเดิมเข้าไม่ได้ · จับเกมค้าง · กันวนลูป
 --   3) กันโดนเตะเพราะ AFK 20 นาที (ปิดได้)
@@ -24,6 +25,8 @@ local CFG = {
     ONLINE_WAIT       = 180,   -- รอเน็ตกลับสูงสุดกี่วินาทีก่อนสั่งเข้า (เกินแล้วลองสั่งเข้าเลย)
     STUCK_SECONDS     = 30,    -- สั่งวาร์ปแล้วยังไม่ไปภายในกี่วินาที ถือว่าค้าง ลองวิธีถัดไป
     BUTTON_WAIT       = 10,    -- กดปุ่ม Reconnect บนหน้าต่างหลุดแล้วรอกี่วินาทีก่อนลองวิธีถัดไป
+    NO_REPLY_SECONDS  = 12,    -- (ตอนอยู่ในแมตช์) สั่งวาร์ปแล้ว Roblox เงียบสนิท ไม่เริ่มวาร์ป ไม่ฟ้อง error ภายในกี่วินาที ให้ข้ามไปวิธีถัดไปเลย
+    FIND_TIMEOUT      = 8,     -- ค้นหาเซิร์ฟที่ว่างนานเกินกี่วินาทีให้เลิก แล้วใช้เซิร์ฟสุ่มแทน (กันค้างตอน API ช้า)
     NO_CHAR_SECONDS   = 240,   -- ไม่มีตัวละครนานเกินนี้ถือว่าเกมค้าง รีจอย (ตั้ง 0 = ปิด ใช้กับเกมที่ไม่มีตัวละคร)
     LOOP_LIMIT        = 5,     -- หลุดกี่ครั้งภายใน LOOP_WINDOW ถึงถือว่า "ติดลูป"
     LOOP_WINDOW       = 600,
@@ -1043,12 +1046,14 @@ end
 pcall(function()
     TS.TeleportInitFailed:Connect(function(_, result, msg)
         RT.tpFailed = true
+        RT.tpFailName = (tostring(result):gsub("^Enum%.TeleportResult%.", ""))
         log("วาร์ปล้มเหลว:", tostring(result), tostring(msg))
     end)
 end)
--- ดูว่า Roblox รับคำสั่งวาร์ปจริงไหม (Started / InProgress / Failed) ไว้ใช้วินิจฉัยใน log
+-- ดูว่า Roblox รับคำสั่งวาร์ปจริงไหม (Started / InProgress / Failed) ไว้ใช้วินิจฉัยใน log และบนเม็ดยา
 pcall(function()
     lp.OnTeleport:Connect(function(state)
+        RT.tpState = (tostring(state):gsub("^Enum%.TeleportState%.", ""))
         log("สถานะวาร์ป:", tostring(state))
     end)
 end)
@@ -1289,19 +1294,32 @@ local function reconnect(info, opts)
                 if not m then m = cycle[((attempt - #plan - 1) % #cycle) + 1] end
                 local mlabel = (m == "same" and "เซิร์ฟเดิม") or (m == "open" and "เซิร์ฟที่ว่าง")
                     or (m == "async" and "TeleportAsync") or "เซิร์ฟสุ่ม"
-                UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
-                    "ครั้งที่ " .. attempt .. " · " .. mlabel .. " · " .. target .. " (" .. how .. ")")
-                RT.tpFailed = false
+                local head = "ครั้งที่ " .. attempt .. " · " .. mlabel
+                UI.set("หลุด! กำลังเข้าใหม่", COL.bad, head .. " · " .. target .. " (" .. how .. ")")
+                RT.tpFailed, RT.tpFailName, RT.tpState = false, nil, nil
                 local ok, err
                 if m == "same" then
                     ok, err = pcall(function() TS:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp) end)
                 elseif m == "open" then
-                    local id, why2 = findOpenServer(target)
+                    -- ค้นหาเซิร์ฟแยกเธรด + จับเวลา (กันค้างถ้า API ตอบช้า) แล้วโชว์ขั้นตอนบนเม็ดยา
+                    local done, id, why2 = false, nil, nil
+                    task.spawn(function()
+                        id, why2 = findOpenServer(target)
+                        done = true
+                    end)
+                    local tf = os.clock()
+                    while RT.auto and not done and os.clock() - tf < CFG.FIND_TIMEOUT do
+                        task.wait(0.5)
+                        UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
+                            head .. " · หาเซิร์ฟ " .. math.floor(os.clock() - tf) .. " วิ")
+                    end
+                    if not done then why2 = "หมดเวลา " .. CFG.FIND_TIMEOUT .. " วิ" end
                     if id then
                         log("เจอเซิร์ฟที่ว่าง:", tostring(id):sub(1, 8) .. "...")
                         ok, err = pcall(function() TS:TeleportToPlaceInstance(target, id, lp) end)
                     else
                         mlabel = "เซิร์ฟสุ่ม"
+                        head = "ครั้งที่ " .. attempt .. " · " .. mlabel
                         log("หาเซิร์ฟที่ว่างไม่ได้ (" .. tostring(why2) .. ") ใช้เซิร์ฟสุ่มแทน")
                         ok, err = pcall(function() TS:Teleport(target, lp) end)
                     end
@@ -1322,13 +1340,28 @@ local function reconnect(info, opts)
 
                 -- รอให้วาร์ปเสร็จ (ถ้าสำเร็จสคิปนี้จะถูกปิดไปกับเซิร์ฟเดิม) ล้มเหลวหรือค้างเกิน STUCK_SECONDS ไปวิธีถัดไป
                 local t0 = os.clock()
+                local silent = false
                 while RT.auto and os.clock() - t0 < CFG.STUCK_SECONDS do
                     task.wait(1)
                     local waited = os.clock() - t0
+                    -- โชว์บนเม็ดยาว่า Roblox ตอบอะไรกลับมา (ไม่ตอบ / Started / InProgress / ชื่อ error)
+                    local st = RT.tpFailed and ("ล้มเหลว " .. tostring(RT.tpFailName or "?"))
+                        or RT.tpState or "Roblox ยังไม่ตอบ"
+                    UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
+                        head .. " · รอ " .. math.floor(waited) .. "/" .. CFG.STUCK_SECONDS .. " วิ · " .. st)
                     if (RT.tpFailed or not ok) and waited >= 3 then break end
+                    -- ในแมตช์: ถ้า Roblox เงียบสนิทเลย ไม่ต้องรอครบ ข้ามไปวิธีถัดไป
+                    if inMatch and ok and not RT.tpFailed and RT.tpState == nil and waited >= CFG.NO_REPLY_SECONDS then
+                        silent = true
+                        break
+                    end
                 end
                 if RT.auto then
-                    log(RT.tpFailed and "วาร์ปล้มเหลว" or ((not ok) and "สั่งวาร์ปไม่ได้" or "ค้างเกิน " .. CFG.STUCK_SECONDS .. " วิ"), "-> ไปวิธีถัดไป")
+                    log(RT.tpFailed and ("วาร์ปล้มเหลว " .. tostring(RT.tpFailName or ""))
+                        or ((not ok) and ("สั่งวาร์ปไม่ได้: " .. tostring(err)))
+                        or (silent and ("Roblox เงียบ ไม่ตอบคำสั่งวาร์ปใน " .. CFG.NO_REPLY_SECONDS .. " วิ")
+                            or ("ค้างเกิน " .. CFG.STUCK_SECONDS .. " วิ (สถานะ: " .. tostring(RT.tpState) .. ")")),
+                        "-> ไปวิธีถัดไป")
                 end
 
                 -- วิธีสำรอง: กดปุ่ม Reconnect/Rejoin บนหน้าต่างแจ้งหลุด
