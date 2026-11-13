@@ -2,6 +2,8 @@
 -- v3: แก้ตอนหลุดกลางแมตช์ (อยู่คนละแมพกับหน้าหลัก เช่น Anime Adventures ในด่าน) ให้ไปล็อบบี้ด้วยวิธีเดียวกับที่ใช้ได้ในล็อบบี้ก่อน
 --     ลดเวลารอที่ค้างต่อวิธี (60 -> 30 วิ) · เพิ่มวิธีสำรอง TeleportAsync · เพิ่ม log ให้เห็นว่าติดขั้นไหน (กดปุ่ม "คัดลอก log")
 --     เม็ดยาโชว์ขั้นตอนสด ๆ ตอนรีจอย (หาเซิร์ฟ / รอ Roblox กี่วิ / Roblox ตอบอะไร) · ค้นหาเซิร์ฟมีเวลาตัดไม่ให้ค้าง
+--     v3.2: มีป้ายเวอร์ชันท้ายบรรทัด "ไป:" บนเม็ดยา · ถ้าโค้ดรีจอยพังกลางทางจะขึ้น error แทนค้างเงียบ
+--     (ถ้าก๊อป aa_rejoin.lua ไว้ใน autoexec ต้องเอาตัวใหม่ไปทับ ไม่งั้นจะรันตัวเก่า)
 --   1) เฝ้าหน้าต่างแจ้งหลุดของ Roblox แล้วแยกสาเหตุ (เน็ต / เซิร์ฟปิด / โดนเตะ / บัญชีเข้าซ้ำ / แบน) ตัดสินใจเอง
 --   2) รอเน็ตกลับก่อนค่อยสั่งเข้า · หาเซิร์ฟสาธารณะที่ยังว่างถ้าเซิร์ฟเดิมเข้าไม่ได้ · จับเกมค้าง · กันวนลูป
 --   3) กันโดนเตะเพราะ AFK 20 นาที (ปิดได้)
@@ -43,6 +45,7 @@ local CFG = {
 
 local FILE        = "aa_rejoin.lua"
 local STATE_FILE  = "aa_rejoin_state.json"
+local VERSION     = "v3.2"   -- โชว์ท้ายบรรทัด "ไป:" บนเม็ดยา ไว้เช็คว่ารันตัวใหม่จริงไหม
 
 local Players      = game:GetService("Players")
 local TS           = game:GetService("TeleportService")
@@ -922,7 +925,7 @@ local function refreshInfo()
             .. "ก่อน" .. (S.lastReason and (" (" .. S.lastReason .. ")") or "")
     end
     local tid, how = resolveTarget()
-    UI.info3.Text = "ไป: " .. tostring(tid) .. " (" .. how .. ")"
+    UI.info3.Text = "ไป: " .. tostring(tid) .. " (" .. how .. ") · " .. VERSION
     local ev = {}
     for i = #S.events, math.max(1, #S.events - 1), -1 do
         local e = S.events[i]
@@ -1235,6 +1238,8 @@ local function reconnect(info, opts)
     end
 
     task.spawn(function()
+      -- ครอบด้วย xpcall: ถ้าโค้ดข้างในพังกลางทาง จะขึ้น error บนเม็ดยา/ใน log แทนที่จะค้างเงียบ ๆ ตลอดไป
+      local okT, errT = xpcall(function()
         -- หลุดถี่ผิดปกติ (ติดลูป): พักก่อนแล้วค่อยลอง ไม่ยิง Teleport รัวๆ
         if S.pending == "drop" and recentCount() >= CFG.LOOP_LIMIT then
             local cd = CFG.LOOP_COOLDOWN
@@ -1379,6 +1384,12 @@ local function reconnect(info, opts)
                 task.wait(delay)
             end
         end
+      end, function(e) return tostring(e) end)
+      if not okT then
+        log("ERROR รีจอย:", tostring(errT):sub(1, 160))
+        UI.set("รีจอยผิดพลาด", COL.bad, tostring(errT):sub(1, 60))
+        RT.rejoining = false
+      end
     end)
 end
 
@@ -1396,7 +1407,7 @@ end
 
 -- ===================== เริ่มทำงาน =====================
 local function main()
-    log("PlaceId =", game.PlaceId, "· GameId =", game.GameId)
+    log("เวอร์ชัน", VERSION, "· PlaceId =", game.PlaceId, "· GameId =", game.GameId)
 
     -- เช็ค executor
     local caps = {
