@@ -1,7 +1,7 @@
 -- Auto Rejoin: เน็ตหลุด / โดนเตะ / เซิร์ฟล่ม -> เข้าเกมใหม่เอง (ใช้ได้กับทุกแมพ ทุกเกม)
 --   1) เฝ้าหน้าต่างแจ้งหลุดของ Roblox พอขึ้นก็สั่งเข้าเกมใหม่ ถ้าเน็ตยังไม่มาจะลองซ้ำเรื่อยๆ
 --   2) กันโดนเตะเพราะ AFK 20 นาที (ปิดได้)
---   3) UI แบบ Dynamic Island: แตะเพื่อดูข้อมูล/ประวัติการหลุด ลากเพื่อย้าย
+--   3) UI แบบ Dynamic Island สไตล์ iOS: แตะเพื่อดูข้อมูล/ประวัติการหลุด ลากเพื่อย้าย · แท็บ "ธีม" เปลี่ยนโหมดมืด/สว่าง/อัตโนมัติ สีหลัก และขนาดได้ (แท็บเล็ตขยายให้เอง)
 -- ไม่มีลูปเข้าโหมด/เข้าด่านอะไรทั้งนั้น ทำแค่พากลับเข้าเกม
 -- วางทั้งไฟล์ใน executor แล้วรันครั้งเดียว มันจะเซฟตัวเองเป็น aa_rejoin.lua ใน workspace
 -- แล้วรันซ้ำเองหลังวาร์ปทุกครั้ง (queue_on_teleport)
@@ -91,34 +91,150 @@ local function resolveTarget()
     return game.PlaceId, "แมพปัจจุบัน"
 end
 
--- ===================== UI (Dynamic Island) =====================
+-- ===================== UI (Dynamic Island สไตล์ iOS) =====================
 local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
 
-local COL = {
-    bg    = Color3.fromRGB(0, 0, 0),
-    panel = Color3.fromRGB(28, 28, 32),
-    line  = Color3.fromRGB(80, 80, 90),
-    text  = Color3.fromRGB(245, 245, 250),
-    dim   = Color3.fromRGB(142, 142, 152),
-    ok    = Color3.fromRGB(52, 211, 120),
-    warn  = Color3.fromRGB(255, 190, 60),
-    bad   = Color3.fromRGB(255, 84, 84),
-    acc   = Color3.fromRGB(100, 140, 255),
-    tab   = Color3.fromRGB(62, 62, 70),
+-- ฟอนต์: Gotham ใกล้ SF Pro ที่สุดใน Roblox (ถ้าตัวอักษรไทยดูแปลก เปลี่ยนตรงนี้ที่เดียวได้)
+local F = {
+    reg  = Enum.Font.GothamMedium,
+    semi = Enum.Font.GothamSemibold,
+    bold = Enum.Font.GothamBold,
+    mono = Enum.Font.RobotoMono,
 }
 
-local CW, CH = 270, 38    -- ขนาดตอนย่อ (เม็ดยา)
-local EW, EH = 340, 364   -- ขนาดตอนขยาย
-local UI = { gui = nil, color = COL.dim, act = {}, expanded = false, page = 1, tick = false }
+-- ---------- ธีม (โทนสีระบบของ iOS) ----------
+local THEMES = {
+    dark = {
+        island = Color3.fromRGB(0, 0, 0),
+        card   = Color3.fromRGB(28, 28, 30),
+        seg    = Color3.fromRGB(28, 28, 30),
+        segIn  = Color3.fromRGB(58, 58, 62),
+        thumb  = Color3.fromRGB(99, 99, 102),
+        line   = Color3.fromRGB(58, 58, 62),
+        text   = Color3.fromRGB(255, 255, 255),
+        dim    = Color3.fromRGB(142, 142, 147),
+        swOff  = Color3.fromRGB(57, 57, 61),
+        ok     = Color3.fromRGB(48, 209, 88),
+        warn   = Color3.fromRGB(255, 159, 10),
+        bad    = Color3.fromRGB(255, 69, 58),
+    },
+    light = {
+        island = Color3.fromRGB(242, 242, 247),
+        card   = Color3.fromRGB(255, 255, 255),
+        seg    = Color3.fromRGB(226, 226, 231),
+        segIn  = Color3.fromRGB(238, 238, 243),
+        thumb  = Color3.fromRGB(255, 255, 255),
+        line   = Color3.fromRGB(214, 214, 220),
+        text   = Color3.fromRGB(20, 20, 22),
+        dim    = Color3.fromRGB(110, 110, 118),
+        swOff  = Color3.fromRGB(225, 225, 230),
+        ok     = Color3.fromRGB(52, 199, 89),
+        warn   = Color3.fromRGB(255, 149, 0),
+        bad    = Color3.fromRGB(255, 59, 48),
+    },
+}
+-- { ชื่อ, สีโหมดสว่าง, สีโหมดมืด }
+local ACCENTS = {
+    { "ฟ้า",     Color3.fromRGB(0, 122, 255),  Color3.fromRGB(10, 132, 255) },
+    { "เขียว",   Color3.fromRGB(52, 199, 89),  Color3.fromRGB(48, 209, 88) },
+    { "ส้ม",     Color3.fromRGB(255, 149, 0),  Color3.fromRGB(255, 159, 10) },
+    { "ชมพู",    Color3.fromRGB(255, 45, 85),  Color3.fromRGB(255, 55, 95) },
+    { "ม่วง",    Color3.fromRGB(175, 82, 222), Color3.fromRGB(191, 90, 242) },
+    { "แดง",     Color3.fromRGB(255, 59, 48),  Color3.fromRGB(255, 69, 58) },
+    { "ฟ้าอ่อน", Color3.fromRGB(48, 176, 199), Color3.fromRGB(64, 200, 224) },
+}
+local MODES     = { "dark", "light", "auto" }
+local SIZE_MULT = { 0.85, 1, 1.2 }
+
+-- ชื่อสีสำหรับส่งเข้า UI.set (ค่าสีจริงเปลี่ยนตามธีมเอง)
+local COL = { ok = "ok", warn = "warn", bad = "bad", dim = "dim", text = "text", acc = "acc" }
+
+local CW, CH = 262, 36    -- ขนาดตอนย่อ (เม็ดยา)
+local EW, EH = 336, 366   -- ขนาดตอนขยาย (ขนาดออกแบบ ก่อนคูณสเกลตามหน้าจอ)
+local UI = {
+    gui = nil, color = "dim", act = {}, expanded = false, page = 1, tick = false,
+    dots = {}, hooks = {}, lastToggle = 0, isDark = true,
+}
 local logLines, allLines = {}, {}
 local FPS = { frames = 0, value = 0, t = os.clock() }
+local TH = {}   -- ธีมที่ใช้อยู่ตอนนี้ (ชื่อสี -> Color3)
 
+local function currentDark()
+    local m = S.mode or "dark"
+    if m == "auto" then
+        local h = tonumber(os.date("%H")) or 20
+        return not (h >= 6 and h < 18)   -- กลางวันสว่าง กลางคืนมืด ตามนาฬิกาเครื่อง
+    end
+    return m ~= "light"
+end
+
+local function computeTheme()
+    local dark = currentDark()
+    local base = dark and THEMES.dark or THEMES.light
+    for k, v in pairs(base) do TH[k] = v end
+    local a = ACCENTS[S.accent or 1] or ACCENTS[1]
+    TH.acc = dark and a[3] or a[2]
+    return dark
+end
+computeTheme()
+
+-- ---------- ตัวช่วยสร้าง UI + ระบบผูกสีกับธีม ----------
+local binds, bindOf = {}, {}
+local TI_THEME = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- ค่าที่เป็นข้อความในพร็อพเพอร์ตี้สี (เช่น BackgroundColor3 = "card") = ชื่อสีของธีม จะเปลี่ยนตามธีมเอง
 local function new(class, props, parent)
     local o = Instance.new(class)
-    for k, v in pairs(props) do o[k] = v end
+    for k, v in pairs(props) do
+        if type(v) == "string" and (k == "Color" or k:sub(-6) == "Color3") then
+            local rec = { o = o, p = k, k = v }
+            binds[#binds + 1] = rec
+            bindOf[o] = bindOf[o] or {}
+            bindOf[o][k] = rec
+            o[k] = TH[v]
+        else
+            o[k] = v
+        end
+    end
     o.Parent = parent
     return o
+end
+
+local function round(o, r)
+    new("UICorner", { CornerRadius = r or UDim.new(1, 0) }, o)
+    return o
+end
+
+local function tw(o, t, props, style, dir)
+    local tween = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out), props)
+    tween:Play()
+    return tween
+end
+
+-- เปลี่ยนชื่อสีที่ผูกไว้ (เช่น ตัวหนังสือจาก "dim" เป็น "text") แบบมีแอนิเมชัน
+local function recolor(o, p, key, animated)
+    local rec = bindOf[o] and bindOf[o][p]
+    if rec then
+        if rec.k == key then return end
+        rec.k = key
+    end
+    local c = TH[key]
+    if not c then return end
+    if animated == false then o[p] = c else TweenService:Create(o, TI_THEME, { [p] = c }):Play() end
+end
+
+local function applyTheme(animated)
+    UI.isDark = computeTheme()
+    for _, rec in ipairs(binds) do
+        local c = TH[rec.k]
+        if c and rec.o.Parent ~= nil then
+            if animated then TweenService:Create(rec.o, TI_THEME, { [rec.p] = c }):Play()
+            else rec.o[rec.p] = c end
+        end
+    end
+    for _, h in ipairs(UI.hooks) do pcall(h, animated) end
+    if UI.paint then UI.paint(true) end
 end
 
 local function mount(gui)
@@ -152,6 +268,23 @@ local function getPing()
     return nil
 end
 
+-- ขนาดหน้าจอ + กันเกาะหลุดขอบ
+local function getVP()
+    local v = UI.gui and UI.gui.AbsoluteSize or Vector2.new(0, 0)
+    if v.X < 50 or v.Y < 50 then
+        local cam = workspace.CurrentCamera
+        v = cam and cam.ViewportSize or Vector2.new(1280, 720)
+    end
+    return v
+end
+
+local function clampXY(x, y, w, h)
+    local vp = getVP()
+    local mx = math.max(0, vp.X / 2 - w / 2 - 6)
+    local my = math.max(6, vp.Y - h - 6)
+    return math.clamp(x, -mx, mx), math.clamp(y, 6, my)
+end
+
 -- ลาก = ย้าย / แตะ = onTap
 local function makeDrag(handle, target, onTap)
     local down, moved, startPos, startPosV = false, false, nil, nil
@@ -182,177 +315,351 @@ local function makeDrag(handle, target, onTap)
             local d = i.Position - startPosV
             if not moved and d.Magnitude > 8 then moved = true end
             if moved then
-                target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+                local a = target.AbsoluteSize
+                local x, y = clampXY(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y, a.X, a.Y)
+                target.Position = UDim2.new(startPos.X.Scale, x, startPos.Y.Scale, y)
             end
         end
     end)
 end
 
+-- กดแล้วย่อลงนิดนึงแล้วเด้งกลับ (เหมือนปุ่มใน iOS)
+local function pressFx(btn, depth)
+    local sc = new("UIScale", { Scale = 1 }, btn)
+    local function isPtr(i)
+        return i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch
+    end
+    btn.InputBegan:Connect(function(i)
+        if isPtr(i) then tw(sc, 0.12, { Scale = depth or 0.95 }) end
+    end)
+    btn.InputEnded:Connect(function(i)
+        if isPtr(i) then tw(sc, 0.4, { Scale = 1 }, Enum.EasingStyle.Back) end
+    end)
+end
+
+-- Segmented control แบบ iOS (แถบเลื่อนลื่นๆ)
+local function segmented(parent, o)
+    local labels = o.labels
+    local n = #labels
+    local track = new("Frame", {
+        AnchorPoint = o.anchor or Vector2.new(0, 0), Position = o.pos, Size = o.size,
+        BackgroundColor3 = o.track or "seg", BorderSizePixel = 0,
+    }, parent)
+    round(track, UDim.new(0, 9))
+    local inner = new("Frame", {
+        Position = UDim2.fromOffset(2, 2), Size = UDim2.new(1, -4, 1, -4), BackgroundTransparency = 1,
+    }, track)
+    local thumb = new("Frame", {
+        Size = UDim2.new(1 / n, 0, 1, 0), BackgroundColor3 = "thumb", BorderSizePixel = 0,
+    }, inner)
+    round(thumb, UDim.new(0, 7))
+    new("UIStroke", { Color = "line", Thickness = 1, Transparency = 0.6 }, thumb)
+    local btns = {}
+    local api = {}
+    for i, name in ipairs(labels) do
+        local b = new("TextButton", {
+            Text = name, Font = F.semi, TextSize = o.ts or 13, TextColor3 = "dim",
+            Position = UDim2.new((i - 1) / n, 0, 0, 0), Size = UDim2.new(1 / n, 0, 1, 0),
+            BackgroundTransparency = 1, BorderSizePixel = 0, AutoButtonColor = false, ZIndex = 2,
+        }, inner)
+        b.Activated:Connect(function()
+            api.set(i, true)
+            if o.onPick then o.onPick(i) end
+        end)
+        btns[i] = b
+    end
+    function api.set(i, animate)
+        local pos = UDim2.new((i - 1) / n, 0, 0, 0)
+        if animate then tw(thumb, 0.32, { Position = pos }) else thumb.Position = pos end
+        for j, b in ipairs(btns) do
+            recolor(b, "TextColor3", j == i and "text" or "dim", animate and true or false)
+        end
+    end
+    return api
+end
+
+-- สวิตช์เปิด/ปิดแบบ iOS
+local function iosSwitch(parent, pos, onTap)
+    local W, H = 46, 28
+    local btn = new("TextButton", {
+        Text = "", AutoButtonColor = false, Position = pos, Size = UDim2.fromOffset(W, H),
+        BackgroundColor3 = "swOff", BorderSizePixel = 0,
+    }, parent)
+    round(btn)
+    local knob = new("Frame", {
+        Position = UDim2.fromOffset(2, 2), Size = UDim2.fromOffset(H - 4, H - 4),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+    }, btn)
+    round(knob)
+    new("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = 1, Transparency = 0.9 }, knob)
+    pressFx(btn, 0.94)
+    local api = { on = false }
+    function api.set(on, animate)
+        api.on = on and true or false
+        local x = on and (W - (H - 4) - 2) or 2
+        local p = UDim2.fromOffset(x, 2)
+        if animate then tw(knob, 0.3, { Position = p }, Enum.EasingStyle.Back) else knob.Position = p end
+        recolor(btn, "BackgroundColor3", on and "ok" or "swOff", animate and true or false)
+    end
+    btn.Activated:Connect(function() if onTap then onTap() end end)
+    return api
+end
+
+-- ปุ่มสีจางแบบ iOS (tinted)
+local function tintedBtn(parent, text, key, pos, size, needConfirm, fn)
+    local b = new("TextButton", {
+        Text = text, Font = F.semi, TextSize = 15, TextColor3 = key, BackgroundColor3 = key,
+        BackgroundTransparency = 0.84, BorderSizePixel = 0, AutoButtonColor = false,
+        Position = pos, Size = size,
+    }, parent)
+    round(b, UDim.new(0, 12))
+    pressFx(b, 0.95)
+    local armed = false
+    local function reset()
+        armed = false
+        b.Text = text
+        recolor(b, "TextColor3", key)
+        recolor(b, "BackgroundColor3", key)
+    end
+    b.Activated:Connect(function()
+        if needConfirm and not armed then
+            armed = true
+            b.Text = "กดอีกที?"
+            recolor(b, "TextColor3", "bad")
+            recolor(b, "BackgroundColor3", "bad")
+            task.delay(3, function() if armed then reset() end end)
+            return
+        end
+        reset()
+        pcall(fn)
+    end)
+    return b
+end
+
 local function buildUI()
     if genv.AA_REJOIN_GUI then pcall(function() genv.AA_REJOIN_GUI:Destroy() end) end
+    UI.isDark = computeTheme()
 
     local gui = new("ScreenGui", {
         Name = "Rejoin_Island", ResetOnSpawn = false, DisplayOrder = 999,
         IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
     })
+    UI.gui = gui
 
-    -- ตัวเกาะ (ดำสนิท ขอบบางๆ เหมือน Dynamic Island)
+    -- ตัวเกาะ
     local island = new("Frame", {
         Name = "Island", AnchorPoint = Vector2.new(0.5, 0),
-        Position = UDim2.new(0.5, S.ox or 0, 0, S.oy or 44),
+        Position = UDim2.new(0.5, S.ox or 0, 0, S.oy or 14),
         Size = UDim2.fromOffset(CW, CH),
-        BackgroundColor3 = COL.bg, BorderSizePixel = 0, Active = true, ClipsDescendants = true,
+        BackgroundColor3 = "island", BorderSizePixel = 0, Active = true, ClipsDescendants = true,
     }, gui)
-    local corner = new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, island)
-    new("UIStroke", { Color = COL.line, Thickness = 1, Transparency = 0.5 }, island)
+    local corner = new("UICorner", { CornerRadius = UDim.new(0, CH / 2) }, island)
+    local rim = new("UIStroke", { Color = "line", Thickness = 1, Transparency = 0.25 }, island)
+    new("UIGradient", {   -- ขอบสว่างด้านบน จางลงด้านล่าง (ลุคกระจกแบบ iOS)
+        Rotation = 90,
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.65),
+        }),
+    }, rim)
+    local scaleObj = new("UIScale", { Scale = 1 }, island)
+
+    -- ขนาดตามหน้าจอ: แท็บเล็ต/จอใหญ่จะขยายเอง, มือถือไม่ล้นจอ, ปรับ เล็ก/กลาง/ใหญ่ ได้ในแท็บ "ธีม"
+    local function calcScale()
+        local vp = getVP()
+        local auto = math.clamp(vp.Y / 420, 0.9, 1.6)
+        local s = auto * (SIZE_MULT[S.size or 2] or 1)
+        local fit = math.min((vp.Y - 16) / EH, (vp.X - 16) / EW)
+        return math.max(0.55, math.min(s, fit))
+    end
+
+    local function makeDot(parent, cx, cy, d)
+        local glow = new("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy),
+            Size = UDim2.fromOffset(d + 8, d + 8), BackgroundColor3 = TH.dim,
+            BackgroundTransparency = 0.85, BorderSizePixel = 0,
+        }, parent)
+        round(glow)
+        local dot = new("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(cx, cy),
+            Size = UDim2.fromOffset(d, d), BackgroundColor3 = TH.dim, BorderSizePixel = 0,
+        }, parent)
+        round(dot)
+        table.insert(UI.dots, { dot = dot, glow = glow, d = d })
+        return dot
+    end
 
     -- ---------- แบบย่อ ----------
-    local compact = new("Frame", { Name = "Compact", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1 }, island)
-    local glow = new("Frame", {
-        Size = UDim2.fromOffset(22, 22), Position = UDim2.fromOffset(8, 8),
-        BackgroundColor3 = COL.dim, BackgroundTransparency = 0.85, BorderSizePixel = 0,
-    }, compact)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, glow)
-    local dot = new("Frame", {
-        Size = UDim2.fromOffset(10, 10), Position = UDim2.fromOffset(14, 14),
-        BackgroundColor3 = COL.dim, BorderSizePixel = 0,
-    }, compact)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot)
+    local compact = new("CanvasGroup", {
+        Name = "Compact", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0),
+        Size = UDim2.fromOffset(CW, CH), BackgroundTransparency = 1, BorderSizePixel = 0,
+    }, island)
+    makeDot(compact, 19, CH / 2, 10)
     local cStatus = new("TextLabel", {
-        Text = "กำลังเริ่ม...", Position = UDim2.fromOffset(38, 0), Size = UDim2.new(1, -116, 1, 0),
-        BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextSize = 17, TextColor3 = COL.text,
+        Text = "กำลังเริ่ม...", Position = UDim2.fromOffset(38, 0), Size = UDim2.new(1, -112, 1, 0),
+        BackgroundTransparency = 1, Font = F.semi, TextSize = 14, TextColor3 = "text",
         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
     }, compact)
     local cTime = new("TextLabel", {
         Text = "0:00:00", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -16, 0, 0),
-        Size = UDim2.fromOffset(66, CH), BackgroundTransparency = 1, Font = Enum.Font.SourceSans,
-        TextSize = 15, TextColor3 = COL.dim, TextXAlignment = Enum.TextXAlignment.Right,
+        Size = UDim2.fromOffset(60, CH), BackgroundTransparency = 1, Font = F.reg,
+        TextSize = 12, TextColor3 = "dim", TextXAlignment = Enum.TextXAlignment.Right,
     }, compact)
 
     -- ---------- แบบขยาย ----------
-    local full = new("Frame", { Name = "Full", Size = UDim2.fromOffset(EW, EH), BackgroundTransparency = 1, Visible = false }, island)
+    local full = new("CanvasGroup", {
+        Name = "Full", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0),
+        Size = UDim2.fromOffset(EW, EH), BackgroundTransparency = 1, BorderSizePixel = 0,
+        Visible = false, GroupTransparency = 1,
+    }, island)
+    local fullScale = new("UIScale", { Scale = 0.92 }, full)
 
-    local head = new("Frame", { Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1, Active = true }, full)
-    local dot2 = new("Frame", {
-        Size = UDim2.fromOffset(12, 12), Position = UDim2.fromOffset(20, 15),
-        BackgroundColor3 = COL.dim, BorderSizePixel = 0,
-    }, head)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, dot2)
-    local status = new("TextLabel", {
-        Text = "กำลังเริ่ม...", Position = UDim2.fromOffset(42, 6), Size = UDim2.new(1, -100, 0, 26),
-        BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextSize = 21, TextColor3 = COL.text,
-        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-    }, head)
-    local detail = new("TextLabel", {
-        Text = "", Position = UDim2.fromOffset(20, 33), Size = UDim2.new(1, -40, 0, 20),
-        BackgroundTransparency = 1, Font = Enum.Font.SourceSans, TextSize = 14, TextColor3 = COL.dim,
-        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-    }, head)
-    new("TextLabel", {
-        Text = "แตะเพื่อย่อ", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -18, 0, 10),
-        Size = UDim2.fromOffset(70, 20), BackgroundTransparency = 1, Font = Enum.Font.SourceSans,
-        TextSize = 13, TextColor3 = COL.dim, TextXAlignment = Enum.TextXAlignment.Right,
-    }, head)
-
-    -- แท็บ
-    local tabs = new("Frame", {
-        Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, 28),
-        BackgroundColor3 = COL.panel, BorderSizePixel = 0,
+    -- พื้นที่แตะ/ลากส่วนหัว (แตะ = ย่อ) วางไว้ล่างสุดให้ข้อความอยู่ข้างบน
+    local hit = new("TextButton", {
+        Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0,
+        Size = UDim2.new(1, -80, 0, 76),
     }, full)
-    new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, tabs)
+
+    local grab = new("Frame", {   -- ที่จับด้านบนแบบ sheet ของ iOS
+        AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 6), Size = UDim2.fromOffset(36, 5),
+        BackgroundColor3 = "dim", BackgroundTransparency = 0.55, BorderSizePixel = 0,
+    }, full)
+    round(grab)
+    new("TextLabel", {
+        Text = "AUTO REJOIN", Position = UDim2.fromOffset(20, 14), Size = UDim2.fromOffset(140, 14),
+        BackgroundTransparency = 1, Font = F.semi, TextSize = 11, TextColor3 = "dim",
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, full)
+    makeDot(full, 26, 41, 12)
+    local status = new("TextLabel", {
+        Text = "กำลังเริ่ม...", Position = UDim2.fromOffset(40, 29), Size = UDim2.new(1, -116, 0, 24),
+        BackgroundTransparency = 1, Font = F.bold, TextSize = 18, TextColor3 = "text",
+        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    }, full)
+    local detail = new("TextLabel", {
+        Text = "", Position = UDim2.fromOffset(20, 54), Size = UDim2.new(1, -92, 0, 18),
+        BackgroundTransparency = 1, Font = F.reg, TextSize = 12, TextColor3 = "dim",
+        TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    }, full)
+
+    -- สวิตช์รีจอยอัตโนมัติ (มุมขวาบน)
+    local sw = iosSwitch(full, UDim2.new(1, -66, 0, 22), function()
+        if UI.act.auto then UI.act.auto() end
+    end)
+    new("TextLabel", {
+        Text = "รีจอย", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(1, -43, 0, 52),
+        Size = UDim2.fromOffset(70, 14), BackgroundTransparency = 1, Font = F.reg, TextSize = 11,
+        TextColor3 = "dim",
+    }, full)
+
+    -- แท็บ (segmented control)
+    local pages = {}
+    local showPage
+    local tabsSeg = segmented(full, {
+        labels = { "ตัวละคร", "สถานะ", "Log", "ธีม" },
+        pos = UDim2.fromOffset(14, 80), size = UDim2.new(1, -28, 0, 30), track = "seg", ts = 13,
+        onPick = function(i)
+            showPage(i, true)
+            pcall(UI.refresh)
+        end,
+    })
 
     local holder = new("Frame", {
-        Position = UDim2.fromOffset(12, 98), Size = UDim2.new(1, -24, 0, 206), BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(14, 118), Size = UDim2.new(1, -28, 0, 188), BackgroundTransparency = 1,
     }, full)
-    local pages = {}
-    for i = 1, 3 do
-        pages[i] = new("Frame", { Name = "Page" .. i, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, holder)
+    for i = 1, 4 do
+        pages[i] = new("CanvasGroup", {
+            Name = "Page" .. i, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+            BorderSizePixel = 0, Visible = false,
+        }, holder)
     end
 
-    local tabNames = { "ตัวละคร", "สถานะ", "Log" }
-    local tabBtns = {}
-    local function showPage(n)
+    showPage = function(n, animate)
+        local prev = UI.page
         UI.page = n
-        for i, b in ipairs(tabBtns) do
-            b.BackgroundTransparency = (i == n) and 0 or 1
-            b.TextColor3 = (i == n) and COL.text or COL.dim
-            pages[i].Visible = (i == n)
+        tabsSeg.set(n, animate)
+        for i, p in ipairs(pages) do
+            if i == n then
+                p.Visible = true
+                if animate and prev ~= n then
+                    local dir = (n > prev) and 1 or -1
+                    p.Position = UDim2.fromOffset(16 * dir, 0)
+                    p.GroupTransparency = 1
+                    tw(p, 0.32, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 })
+                else
+                    p.Position = UDim2.fromOffset(0, 0)
+                    p.GroupTransparency = 0
+                end
+            elseif p.Visible then
+                if animate then
+                    tw(p, 0.15, { GroupTransparency = 1 }, Enum.EasingStyle.Quad)
+                    task.delay(0.16, function() if UI.page ~= i then p.Visible = false end end)
+                else
+                    p.Visible = false
+                end
+            end
         end
     end
-    for i, name in ipairs(tabNames) do
-        local b = new("TextButton", {
-            Text = name, Font = Enum.Font.SourceSansBold, TextSize = 15, TextColor3 = COL.dim,
-            Position = UDim2.new((i - 1) / 3, 0, 0, 0), Size = UDim2.new(1 / 3, 0, 1, 0),
-            BackgroundColor3 = COL.tab, BackgroundTransparency = 1, BorderSizePixel = 0, AutoButtonColor = false,
-        }, tabs)
-        new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, b)
-        b.Activated:Connect(function()
-            showPage(i)
-            pcall(UI.refresh)
-        end)
-        tabBtns[i] = b
-    end
 
-    local function newCard(parent, order, title)
-        local f = new("Frame", { LayoutOrder = order, BackgroundColor3 = COL.panel, BorderSizePixel = 0 }, parent)
-        new("UICorner", { CornerRadius = UDim.new(0, 12) }, f)
+    local function newCard(parent, order, title, h)
+        local f = new("Frame", { LayoutOrder = order, BackgroundColor3 = "card", BorderSizePixel = 0 }, parent)
+        round(f, UDim.new(0, 12))
+        local y0 = math.floor((h - 36) / 2)
         local t = new("TextLabel", {
-            Text = title, Size = UDim2.new(1, -20, 0, 16), Position = UDim2.fromOffset(10, 5),
-            BackgroundTransparency = 1, Font = Enum.Font.SourceSans, TextSize = 13,
-            TextColor3 = COL.dim, TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = title, Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(12, y0),
+            BackgroundTransparency = 1, Font = F.reg, TextSize = 11, TextColor3 = "dim",
+            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
         }, f)
         local v = new("TextLabel", {
-            Text = "-", Size = UDim2.new(1, -20, 0, 22), Position = UDim2.fromOffset(10, 21),
-            BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextScaled = true,
-            TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left,
+            Text = "-", Size = UDim2.new(1, -24, 0, 20), Position = UDim2.fromOffset(12, y0 + 16),
+            BackgroundTransparency = 1, Font = F.bold, TextScaled = true, TextColor3 = "text",
+            TextXAlignment = Enum.TextXAlignment.Left,
         }, f)
-        new("UITextSizeConstraint", { MaxTextSize = 18, MinTextSize = 10 }, v)
+        new("UITextSizeConstraint", { MaxTextSize = 16, MinTextSize = 9 }, v)
         return t, v
     end
 
     -- ----- หน้า 1: ตัวละคร -----
     local p1 = pages[1]
     local avatar = new("ImageLabel", {
-        Size = UDim2.fromOffset(60, 60), BackgroundColor3 = COL.panel, BorderSizePixel = 0,
+        Size = UDim2.fromOffset(52, 52), BackgroundColor3 = "card", BorderSizePixel = 0,
         Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(lp.UserId) .. "&w=150&h=150",
     }, p1)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, avatar)
-    new("UIStroke", { Color = COL.line, Thickness = 1.5 }, avatar)
+    round(avatar)
+    new("UIStroke", { Color = "acc", Thickness = 2 }, avatar)
     new("TextLabel", {
-        Text = lp.DisplayName, Position = UDim2.fromOffset(72, 4), Size = UDim2.new(1, -72, 0, 28),
-        BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold, TextSize = 22, TextColor3 = COL.text,
+        Text = lp.DisplayName, Position = UDim2.fromOffset(64, 4), Size = UDim2.new(1, -64, 0, 24),
+        BackgroundTransparency = 1, Font = F.bold, TextSize = 18, TextColor3 = "text",
         TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
     }, p1)
     new("TextLabel", {
-        Text = "@" .. lp.Name .. " · ID " .. tostring(lp.UserId), Position = UDim2.fromOffset(72, 34),
-        Size = UDim2.new(1, -72, 0, 20), BackgroundTransparency = 1, Font = Enum.Font.SourceSans,
-        TextSize = 14, TextColor3 = COL.dim, TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
+        Text = "@" .. lp.Name .. " · ID " .. tostring(lp.UserId), Position = UDim2.fromOffset(64, 29),
+        Size = UDim2.new(1, -64, 0, 18), BackgroundTransparency = 1, Font = F.reg, TextSize = 12,
+        TextColor3 = "dim", TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
     }, p1)
 
     local hpTrack = new("Frame", {
-        Position = UDim2.fromOffset(0, 71), Size = UDim2.new(1, -78, 0, 10),
-        BackgroundColor3 = COL.panel, BorderSizePixel = 0,
+        Position = UDim2.fromOffset(0, 62), Size = UDim2.new(1, -72, 0, 8),
+        BackgroundColor3 = "seg", BorderSizePixel = 0,
     }, p1)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, hpTrack)
-    local hpFill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = COL.ok, BorderSizePixel = 0 }, hpTrack)
-    new("UICorner", { CornerRadius = UDim.new(1, 0) }, hpFill)
+    round(hpTrack)
+    local hpFill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = TH.ok, BorderSizePixel = 0 }, hpTrack)
+    round(hpFill)
     local hpText = new("TextLabel", {
-        Text = "HP -", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 64),
-        Size = UDim2.fromOffset(72, 24), BackgroundTransparency = 1, Font = Enum.Font.SourceSansBold,
-        TextSize = 15, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Right,
+        Text = "HP -", AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 56),
+        Size = UDim2.fromOffset(64, 20), BackgroundTransparency = 1, Font = F.bold,
+        TextSize = 13, TextColor3 = "text", TextXAlignment = Enum.TextXAlignment.Right,
     }, p1)
 
-    local chipGrid = new("Frame", { Position = UDim2.fromOffset(0, 98), Size = UDim2.new(1, 0, 0, 108), BackgroundTransparency = 1 }, p1)
+    local chipGrid = new("Frame", {
+        Position = UDim2.fromOffset(0, 78), Size = UDim2.new(1, 0, 0, 110), BackgroundTransparency = 1,
+    }, p1)
     new("UIGridLayout", {
-        CellSize = UDim2.new(0.5, -3, 0, 51), CellPadding = UDim2.fromOffset(6, 6),
+        CellSize = UDim2.new(0.5, -3, 0, 52), CellPadding = UDim2.fromOffset(6, 6),
         SortOrder = Enum.SortOrder.LayoutOrder,
     }, chipGrid)
     UI.chips = {}
     for i = 1, 4 do
-        local t, v = newCard(chipGrid, i, "-")
+        local t, v = newCard(chipGrid, i, "-", 52)
         UI.chips[i] = { t = t, v = v }
     end
 
@@ -363,118 +670,256 @@ local function buildUI()
         CellSize = UDim2.new(0.5, -3, 0, 44), CellPadding = UDim2.fromOffset(6, 6),
         SortOrder = Enum.SortOrder.LayoutOrder,
     }, grid2)
-    local _, sRe    = newCard(grid2, 1, "ต่อใหม่สำเร็จแล้ว")
-    local _, sUp    = newCard(grid2, 2, "ออนไลน์รอบนี้")
-    local _, sLast  = newCard(grid2, 3, "หลุดล่าสุด (ผ่านมา)")
-    local _, sPing  = newCard(grid2, 4, "Ping")
-    local _, sFps   = newCard(grid2, 5, "FPS")
-    local _, sPlace = newCard(grid2, 6, "รีจอยไปแมพ")
+    local _, sRe    = newCard(grid2, 1, "ต่อใหม่สำเร็จแล้ว", 44)
+    local _, sUp    = newCard(grid2, 2, "ออนไลน์รอบนี้", 44)
+    local _, sLast  = newCard(grid2, 3, "หลุดล่าสุด (ผ่านมา)", 44)
+    local _, sPing  = newCard(grid2, 4, "Ping", 44)
+    local _, sFps   = newCard(grid2, 5, "FPS", 44)
+    local _, sPlace = newCard(grid2, 6, "รีจอยไปแมพ", 44)
     UI.sRe, UI.sUp, UI.sLast, UI.sPing, UI.sFps, UI.sPlace = sRe, sUp, sLast, sPing, sFps, sPlace
     UI.info = new("TextLabel", {
-        Position = UDim2.fromOffset(2, 152), Size = UDim2.new(1, -4, 0, 52), BackgroundTransparency = 1,
-        Font = Enum.Font.SourceSans, TextSize = 14, TextColor3 = COL.dim, TextWrapped = true,
+        Position = UDim2.fromOffset(2, 150), Size = UDim2.new(1, -4, 0, 38), BackgroundTransparency = 1,
+        Font = F.reg, TextSize = 11, TextColor3 = "dim", TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, Text = "",
     }, p2)
 
     -- ----- หน้า 3: Log -----
     local logBox = new("TextLabel", {
-        Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = COL.panel, BorderSizePixel = 0,
-        Font = Enum.Font.SourceSans, TextSize = 14, TextColor3 = COL.dim, TextWrapped = true,
+        Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = "card", BorderSizePixel = 0,
+        Font = F.mono, TextSize = 11, TextColor3 = "dim", TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Bottom,
         ClipsDescendants = true, Text = "",
     }, pages[3])
-    new("UICorner", { CornerRadius = UDim.new(0, 12) }, logBox)
+    round(logBox, UDim.new(0, 12))
     new("UIPadding", {
         PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
         PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
     }, logBox)
 
+    -- ----- หน้า 4: ธีม (เปลี่ยนโหมด สีหลัก ขนาด) -----
+    local p4 = pages[4]
+    local listCard = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 150), BackgroundColor3 = "card", BorderSizePixel = 0,
+    }, p4)
+    round(listCard, UDim.new(0, 12))
+    local function rowLabel(y, text)
+        new("TextLabel", {
+            Text = text, Position = UDim2.fromOffset(14, y), Size = UDim2.fromOffset(86, 50),
+            BackgroundTransparency = 1, Font = F.semi, TextSize = 14, TextColor3 = "text",
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, listCard)
+    end
+    local function hairline(y)
+        new("Frame", {
+            Position = UDim2.fromOffset(14, y), Size = UDim2.new(1, -14, 0, 1),
+            BackgroundColor3 = "line", BackgroundTransparency = 0.3, BorderSizePixel = 0,
+        }, listCard)
+    end
+    rowLabel(0, "ธีม");     hairline(50)
+    rowLabel(50, "สีหลัก");  hairline(100)
+    rowLabel(100, "ขนาด")
+
+    local function indexOf(list, v, default)
+        for i, x in ipairs(list) do if x == v then return i end end
+        return default
+    end
+
+    local modeSeg = segmented(listCard, {
+        labels = { "มืด", "สว่าง", "อัตโนมัติ" },
+        pos = UDim2.new(1, -12, 0, 25), anchor = Vector2.new(1, 0.5), size = UDim2.fromOffset(190, 30),
+        track = "segIn", ts = 12,
+        onPick = function(i)
+            S.mode = MODES[i]
+            saveState()
+            applyTheme(true)
+            UI.addLog("เปลี่ยนธีม: " .. ({ "มืด", "สว่าง", "อัตโนมัติ (ตามเวลา)" })[i])
+        end,
+    })
+    modeSeg.set(indexOf(MODES, S.mode or "dark", 1), false)
+
+    local swHolder = new("Frame", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0, 75),
+        Size = UDim2.fromOffset(196, 28), BackgroundTransparency = 1,
+    }, listCard)
+    local swBtns, rings = {}, {}
+    local function selectAccent(idx, animate)
+        for j, rs in ipairs(rings) do
+            local t = (j == idx) and 0 or 1
+            if animate then tw(rs, 0.25, { Transparency = t }, Enum.EasingStyle.Quad) else rs.Transparency = t end
+        end
+    end
+    for i, a in ipairs(ACCENTS) do
+        local x = (i - 1) * 28
+        local ring = new("Frame", {
+            Position = UDim2.fromOffset(x, 0), Size = UDim2.fromOffset(28, 28), BackgroundTransparency = 1,
+        }, swHolder)
+        round(ring)
+        rings[i] = new("UIStroke", { Color = "text", Thickness = 2, Transparency = 1 }, ring)
+        local b = new("TextButton", {
+            Text = "", AutoButtonColor = false, Position = UDim2.fromOffset(x + 3, 3),
+            Size = UDim2.fromOffset(22, 22), BorderSizePixel = 0,
+            BackgroundColor3 = UI.isDark and a[3] or a[2],
+        }, swHolder)
+        round(b)
+        pressFx(b, 0.85)
+        b.Activated:Connect(function()
+            S.accent = i
+            saveState()
+            selectAccent(i, true)
+            applyTheme(true)
+            UI.addLog("เปลี่ยนสีหลัก: " .. a[1])
+        end)
+        swBtns[i] = b
+    end
+    selectAccent(S.accent or 1, false)
+    table.insert(UI.hooks, function(animated)   -- สีตัวอย่างต้องเปลี่ยนตามโหมดมืด/สว่างด้วย
+        for i, a in ipairs(ACCENTS) do
+            local c = UI.isDark and a[3] or a[2]
+            if animated then tw(swBtns[i], 0.35, { BackgroundColor3 = c }, Enum.EasingStyle.Quad)
+            else swBtns[i].BackgroundColor3 = c end
+        end
+    end)
+
+    local sizeSeg = segmented(listCard, {
+        labels = { "เล็ก", "กลาง", "ใหญ่" },
+        pos = UDim2.new(1, -12, 0, 125), anchor = Vector2.new(1, 0.5), size = UDim2.fromOffset(150, 30),
+        track = "segIn", ts = 12,
+        onPick = function(i)
+            S.size = i
+            saveState()
+            if UI.applyScale then UI.applyScale() end
+            UI.addLog("ปรับขนาด: " .. ({ "เล็ก", "กลาง", "ใหญ่" })[i])
+        end,
+    })
+    sizeSeg.set(S.size or 2, false)
+
+    new("TextLabel", {
+        Text = "อัตโนมัติ = สว่าง 06:00–18:00 ตามนาฬิกาเครื่อง · ขนาดปรับตามหน้าจอเอง (แท็บเล็ตจะใหญ่ขึ้นให้)",
+        Position = UDim2.fromOffset(4, 156), Size = UDim2.new(1, -8, 0, 30), BackgroundTransparency = 1,
+        Font = F.reg, TextSize = 11, TextColor3 = "dim", TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+    }, p4)
+
     -- ----- ปุ่มด้านล่าง -----
     local actions = new("Frame", {
-        Position = UDim2.fromOffset(12, 312), Size = UDim2.new(1, -24, 0, 36), BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(14, 314), Size = UDim2.new(1, -28, 0, 38), BackgroundTransparency = 1,
     }, full)
-    new("UIGridLayout", {
-        CellSize = UDim2.new(1 / 3, -4, 1, 0), CellPadding = UDim2.fromOffset(6, 0),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-    }, actions)
-    local function pill(order, text, color, needConfirm, fn)
-        local b = new("TextButton", {
-            LayoutOrder = order, Text = text, Font = Enum.Font.SourceSansBold, TextScaled = true,
-            TextColor3 = COL.text, BackgroundColor3 = color, BorderSizePixel = 0,
-        }, actions)
-        new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, b)
-        new("UITextSizeConstraint", { MaxTextSize = 16, MinTextSize = 9 }, b)
-        new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, b)
-        local armed = false
-        b.Activated:Connect(function()
-            if needConfirm and not armed then
-                armed = true
-                b.Text = "กดอีกที?"
-                task.delay(3, function() armed = false; b.Text = text end)
-                return
-            end
-            armed = false
-            b.Text = text
-            pcall(fn)
-        end)
-        return b
+    tintedBtn(actions, "ทดสอบรีจอย", "warn", UDim2.new(0, 0, 0, 0), UDim2.new(0.5, -4, 1, 0), true,
+        function() if UI.act.test then UI.act.test() end end)
+    tintedBtn(actions, "คัดลอก log", "acc", UDim2.new(0.5, 4, 0, 0), UDim2.new(0.5, -4, 1, 0), false,
+        function() if UI.act.copy then UI.act.copy() end end)
+
+    -- ---------- สเกล/ตำแหน่ง ----------
+    UI.applyScale = function()
+        tw(scaleObj, 0.3, { Scale = calcScale() })
+        local sc = calcScale()
+        local w, h = (UI.expanded and EW or CW) * sc, (UI.expanded and EH or CH) * sc
+        local x, y = clampXY(S.ox or 0, S.oy or 14, w, h)
+        tw(island, 0.3, { Position = UDim2.new(0.5, x, 0, y) })
     end
-    UI.btnAuto = pill(1, "รีจอย", COL.ok, false, function() if UI.act.auto then UI.act.auto() end end)
-    pill(2, "ทดสอบรีจอย", Color3.fromRGB(170, 100, 40), true, function() if UI.act.test then UI.act.test() end end)
-    pill(3, "คัดลอก log", Color3.fromRGB(60, 80, 170), false, function() if UI.act.copy then UI.act.copy() end end)
+    gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        if UI.applyScale and not UI.entering then UI.applyScale() end
+    end)
 
     -- ---------- ขยาย / ย่อ ----------
-    local TWEEN_IN  = TweenInfo.new(0.40, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    local TWEEN_OUT = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+    local TWEEN_SIZE = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     local peeking = false
 
     local function expand()
-        if UI.expanded then return end
+        if UI.expanded or os.clock() - UI.lastToggle < 0.3 then return end
+        UI.lastToggle = os.clock()
         UI.expanded = true
-        compact.Visible = false
-        TweenService:Create(island, TWEEN_IN, { Size = UDim2.fromOffset(EW, EH) }):Play()
-        TweenService:Create(corner, TWEEN_IN, { CornerRadius = UDim.new(0, 30) }):Play()
-        task.delay(0.12, function()
-            if UI.expanded then full.Visible = true; pcall(UI.refresh) end
+        local sc = calcScale()
+        local x, y = clampXY(S.ox or 0, S.oy or 14, EW * sc, EH * sc)
+        full.Visible = true
+        full.GroupTransparency = 1
+        fullScale.Scale = 0.9
+        tw(compact, 0.12, { GroupTransparency = 1 }, Enum.EasingStyle.Quad)
+        TweenService:Create(island, TWEEN_SIZE, { Size = UDim2.fromOffset(EW, EH) }):Play()
+        tw(island, 0.45, { Position = UDim2.new(0.5, x, 0, y) })
+        tw(corner, 0.45, { CornerRadius = UDim.new(0, 34) })
+        task.delay(0.08, function()
+            if UI.expanded then
+                tw(full, 0.3, { GroupTransparency = 0 }, Enum.EasingStyle.Quad)
+                tw(fullScale, 0.5, { Scale = 1 }, Enum.EasingStyle.Back)
+                pcall(UI.refresh)
+            end
         end)
+        task.delay(0.14, function() if UI.expanded then compact.Visible = false end end)
     end
+
     local function collapse()
-        if not UI.expanded then return end
+        if not UI.expanded or os.clock() - UI.lastToggle < 0.3 then return end
+        UI.lastToggle = os.clock()
         UI.expanded = false
-        full.Visible = false
-        TweenService:Create(island, TWEEN_OUT, { Size = UDim2.fromOffset(CW, CH) }):Play()
-        TweenService:Create(corner, TWEEN_OUT, { CornerRadius = UDim.new(0.5, 0) }):Play()
-        task.delay(0.18, function()
-            if not UI.expanded then compact.Visible = true end
+        local sc = calcScale()
+        local x, y = clampXY(S.ox or 0, S.oy or 14, CW * sc, CH * sc)
+        tw(full, 0.16, { GroupTransparency = 1 }, Enum.EasingStyle.Quad)
+        tw(fullScale, 0.25, { Scale = 0.92 })
+        compact.Visible = true
+        tw(island, 0.42, { Size = UDim2.fromOffset(CW, CH), Position = UDim2.new(0.5, x, 0, y) })
+        tw(corner, 0.35, { CornerRadius = UDim.new(0, CH / 2) })
+        task.delay(0.1, function()
+            if not UI.expanded then tw(compact, 0.25, { GroupTransparency = 0 }, Enum.EasingStyle.Quad) end
         end)
+        task.delay(0.2, function() if not UI.expanded then full.Visible = false end end)
     end
 
     -- เด้งกว้างขึ้นแป๊บนึงตอนสถานะเปลี่ยน (เหมือน Live Activity)
     UI.peek = function()
         if UI.expanded or peeking then return end
         peeking = true
-        TweenService:Create(island, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-            { Size = UDim2.fromOffset(CW + 44, CH + 8) }):Play()
-        task.delay(1.6, function()
-            if not UI.expanded then
-                TweenService:Create(island, TWEEN_OUT, { Size = UDim2.fromOffset(CW, CH) }):Play()
-            end
+        tw(island, 0.3, { Size = UDim2.fromOffset(CW + 40, CH + 8) }, Enum.EasingStyle.Back)
+        task.delay(1.7, function()
+            if not UI.expanded then tw(island, 0.4, { Size = UDim2.fromOffset(CW, CH) }) end
             peeking = false
         end)
     end
 
-    makeDrag(island, island, function() if not UI.expanded then expand() end end)
-    makeDrag(head, island, collapse)
+    makeDrag(island, island, expand)
+    makeDrag(hit, island, collapse)
 
     RunService.Heartbeat:Connect(function() FPS.frames = FPS.frames + 1 end)
 
-    showPage(1)
+    showPage(1, false)
     if not mount(gui) then gui:Destroy() error("ไม่มีที่ใส่ UI") end
     genv.AA_REJOIN_GUI = gui
-    UI.gui, UI.island = gui, island
+    UI.island = island
     UI.status, UI.detail, UI.cStatus, UI.cTime = status, detail, cStatus, cTime
-    UI.dot, UI.dot2, UI.glow, UI.logBox = dot, dot2, glow, logBox
+    UI.logBox = logBox
     UI.hpFill, UI.hpText = hpFill, hpText
+    UI.setSwitch = function(on) sw.set(on, true) end
+    sw.set(RT.auto, false)
+
+    -- เปิดตัว: เกาะร่วงลงมาจากด้านบนแบบสปริง
+    UI.entering = true
+    task.delay(0.9, function()
+        UI.entering = false
+        if UI.applyScale and not UI.expanded then UI.applyScale() end
+    end)
+    local sc0 = calcScale()
+    scaleObj.Scale = sc0
+    local fx, fy = clampXY(S.ox or 0, S.oy or 14, CW * sc0, CH * sc0)
+    island.Position = UDim2.new(0.5, fx, 0, -CH * sc0 - 12)
+    compact.GroupTransparency = 1
+    tw(island, 0.7, { Position = UDim2.new(0.5, fx, 0, fy) }, Enum.EasingStyle.Back)
+    tw(compact, 0.45, { GroupTransparency = 0 }, Enum.EasingStyle.Quad)
+end
+
+local function tokColor(t)
+    if typeof(t) == "Color3" then return t end
+    return TH[t] or TH.text
+end
+
+-- ทาสีจุดสถานะ (เปลี่ยนเฉพาะตอนสีเปลี่ยนจริง)
+function UI.paint(force)
+    local c = tokColor(UI.color)
+    if not force and UI.paintC == c then return end
+    UI.paintC = c
+    for _, d in ipairs(UI.dots) do
+        tw(d.dot, 0.3, { BackgroundColor3 = c }, Enum.EasingStyle.Quad)
+        tw(d.glow, 0.3, { BackgroundColor3 = c }, Enum.EasingStyle.Quad)
+    end
 end
 
 function UI.set(text, color, det)
@@ -483,8 +928,9 @@ function UI.set(text, color, det)
     UI.lastText = text
     UI.status.Text = text
     UI.cStatus.Text = text
-    UI.color = color or COL.text
+    UI.color = color or "text"
     if det ~= nil then UI.detail.Text = det end
+    UI.paint(false)
     if changed and UI.peek then UI.peek() end
 end
 
@@ -494,7 +940,7 @@ function UI.addLog(msg)
     while #logLines > 14 do table.remove(logLines, 1) end
     table.insert(allLines, line)
     while #allLines > 300 do table.remove(allLines, 1) end
-    if UI.gui then UI.logBox.Text = table.concat(logLines, "\n") end
+    if UI.gui and UI.logBox then UI.logBox.Text = table.concat(logLines, "\n") end
 end
 
 local function refreshChar()
@@ -504,11 +950,11 @@ local function refreshChar()
     if hum then
         local mh = math.max(hum.MaxHealth, 1)
         local frac = math.clamp(hum.Health / mh, 0, 1)
-        UI.hpFill.Size = UDim2.new(frac, 0, 1, 0)
-        UI.hpFill.BackgroundColor3 = frac > 0.5 and COL.ok or (frac > 0.25 and COL.warn or COL.bad)
+        local tok = frac > 0.5 and "ok" or (frac > 0.25 and "warn" or "bad")
+        tw(UI.hpFill, 0.4, { Size = UDim2.new(frac, 0, 1, 0), BackgroundColor3 = TH[tok] })
         UI.hpText.Text = "HP " .. math.floor(hum.Health)
     else
-        UI.hpFill.Size = UDim2.new(0, 0, 1, 0)
+        tw(UI.hpFill, 0.3, { Size = UDim2.new(0, 0, 1, 0) })
         UI.hpText.Text = "HP -"
     end
 
@@ -544,7 +990,7 @@ local function refreshStatus()
     UI.sLast.Text = S.lastDisc and span(os.time() - S.lastDisc) or "ยังไม่เคย"
     local ping = getPing()
     UI.sPing.Text = ping and (ping .. " ms") or "-"
-    UI.sPing.TextColor3 = (not ping) and COL.text or (ping < 150 and COL.ok or (ping < 300 and COL.warn or COL.bad))
+    recolor(UI.sPing, "TextColor3", (not ping) and "text" or (ping < 150 and "ok" or (ping < 300 and "warn" or "bad")))
     UI.sFps.Text = tostring(FPS.value)
     local tid, how = resolveTarget()
     UI.sPlace.Text = tostring(tid)
@@ -554,7 +1000,7 @@ local function refreshStatus()
         .. " · อายุเซิร์ฟ " .. span(workspace.DistributedGameTime) .. " · RAM " .. mem .. " MB · รีจอยแบบ: " .. how
 end
 
--- เรียกทุกวินาที: ไฟกะพริบ = สคิปยังมีชีวิต
+-- เรียกทุกวินาที: จุดสถานะกะพริบ = สคิปยังมีชีวิต
 function UI.refresh()
     if not UI.gui then return end
     local now = os.clock()
@@ -565,11 +1011,15 @@ function UI.refresh()
         FPS.t = now
     end
     UI.tick = not UI.tick
-    UI.dot.BackgroundColor3 = UI.color
-    UI.dot2.BackgroundColor3 = UI.color
-    UI.glow.BackgroundColor3 = UI.color
-    TweenService:Create(UI.glow, TweenInfo.new(0.9, Enum.EasingStyle.Sine),
-        { BackgroundTransparency = UI.tick and 0.55 or 0.9 }):Play()
+    if currentDark() ~= UI.isDark then applyTheme(true) end   -- โหมดอัตโนมัติ: สลับตามเวลา
+    UI.paint(false)
+    for _, d in ipairs(UI.dots) do
+        local big = UI.tick and (d.d + 14) or (d.d + 6)
+        TweenService:Create(d.glow, TweenInfo.new(0.9, Enum.EasingStyle.Sine), {
+            BackgroundTransparency = UI.tick and 0.6 or 0.9,
+            Size = UDim2.fromOffset(big, big),
+        }):Play()
+    end
     UI.cTime.Text = fmt(now - T0)
     if not UI.expanded then return end
     if UI.page == 1 then refreshChar() elseif UI.page == 2 then refreshStatus() end
@@ -615,10 +1065,7 @@ UI.act.copy = function()
 end
 
 local function refreshAutoBtn()
-    if UI.btnAuto then
-        UI.btnAuto.Text = RT.auto and "รีจอย: เปิด" or "รีจอย: ปิด"
-        UI.btnAuto.BackgroundColor3 = RT.auto and COL.ok or Color3.fromRGB(70, 74, 92)
-    end
+    if UI.setSwitch then UI.setSwitch(RT.auto) end
 end
 UI.act.auto = function()
     RT.auto = not RT.auto
