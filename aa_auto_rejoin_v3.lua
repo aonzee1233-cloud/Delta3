@@ -1,10 +1,5 @@
--- Auto Rejoin v3 (เบา ไม่เกะกะ): เน็ตหลุด / โดนเตะ / เซิร์ฟล่ม -> เข้าเกมใหม่เอง (ใช้ได้กับทุกแมพ ทุกเกม)
--- v3: แก้ตอนหลุดกลางแมตช์ (อยู่คนละแมพกับหน้าหลัก เช่น Anime Adventures ในด่าน) ให้ไปล็อบบี้ด้วยวิธีเดียวกับที่ใช้ได้ในล็อบบี้ก่อน
---     ลดเวลารอที่ค้างต่อวิธี (60 -> 30 วิ) · เพิ่ม log ให้เห็นว่าติดขั้นไหน (กดปุ่ม "คัดลอก log")
---     เม็ดยาโชว์ขั้นตอนสด ๆ ตอนรีจอย (หาเซิร์ฟ / รอ Roblox กี่วิ / Roblox ตอบอะไร) · ค้นหาเซิร์ฟมีเวลาตัดไม่ให้ค้าง
---     v3.2: มีป้ายเวอร์ชันท้ายบรรทัด "ไป:" บนเม็ดยา · ถ้าโค้ดรีจอยพังกลางทางจะขึ้น error แทนค้างเงียบ
---     v3.3: เอา TeleportAsync ออก (Roblox ให้เรียกได้จากเซิร์ฟเวอร์เท่านั้น) · ปุ่มทดสอบลองรอบเดียวแล้วจบ ไม่ค้างโหมดรีจอย
---     (ถ้าก๊อป aa_rejoin.lua ไว้ใน autoexec ต้องเอาตัวใหม่ไปทับ ไม่งั้นจะรันตัวเก่า)
+-- v3: แก้ "หลุดในแมตช์แล้วไม่รีจอย" -> ในแมตช์/เซิร์ฟส่วนตัวจะกดปุ่ม Reconnect ของ Roblox ก่อน (รู้จักตัวหนังสือไทย/อังกฤษ) แล้วค่อยวาร์ปไปล็อบบี้
+-- Auto Rejoin v2 (เบา ไม่เกะกะ): เน็ตหลุด / โดนเตะ / เซิร์ฟล่ม -> เข้าเกมใหม่เอง (ใช้ได้กับทุกแมพ ทุกเกม)
 --   1) เฝ้าหน้าต่างแจ้งหลุดของ Roblox แล้วแยกสาเหตุ (เน็ต / เซิร์ฟปิด / โดนเตะ / บัญชีเข้าซ้ำ / แบน) ตัดสินใจเอง
 --   2) รอเน็ตกลับก่อนค่อยสั่งเข้า · หาเซิร์ฟสาธารณะที่ยังว่างถ้าเซิร์ฟเดิมเข้าไม่ได้ · จับเกมค้าง · กันวนลูป
 --   3) กันโดนเตะเพราะ AFK 20 นาที (ปิดได้)
@@ -24,12 +19,11 @@ local CFG = {
     TRY_SAME_SERVER   = true,  -- ครั้งแรกลองกลับเซิร์ฟเดิม (ไม่ได้ค่อยเข้าใหม่) ข้ามเองถ้าเซิร์ฟปิดแล้ว
     FIND_OPEN_SERVER  = true,  -- ถ้าเข้าไม่ได้ ลองหาเซิร์ฟสาธารณะที่ยังไม่เต็มแล้วเข้าตรงๆ
     CONFIRM_SECONDS   = 4,     -- หน้าต่างหลุดต้องค้างกี่วินาทีถึงจะเริ่มรีจอย (กันเด้งผิด)
-    RETRY_DELAY       = 8,     -- พักระหว่างพยายามเข้าใหม่ (เพิ่มทีละเท่านี้ สูงสุด 120 วิ)
+    RETRY_DELAY       = 15,    -- พักระหว่างพยายามเข้าใหม่ (เพิ่มทีละเท่านี้ สูงสุด 120 วิ)
     ONLINE_WAIT       = 180,   -- รอเน็ตกลับสูงสุดกี่วินาทีก่อนสั่งเข้า (เกินแล้วลองสั่งเข้าเลย)
-    STUCK_SECONDS     = 30,    -- สั่งวาร์ปแล้วยังไม่ไปภายในกี่วินาที ถือว่าค้าง ลองวิธีถัดไป
-    BUTTON_WAIT       = 10,    -- กดปุ่ม Reconnect บนหน้าต่างหลุดแล้วรอกี่วินาทีก่อนลองวิธีถัดไป
-    NO_REPLY_SECONDS  = 15,    -- (ตอนอยู่ในแมตช์) สั่งวาร์ปแล้ว Roblox เงียบสนิท ไม่เริ่มวาร์ป ไม่ฟ้อง error ภายในกี่วินาที ให้ข้ามไปวิธีถัดไปเลย
-    FIND_TIMEOUT      = 8,     -- ค้นหาเซิร์ฟที่ว่างนานเกินกี่วินาทีให้เลิก แล้วใช้เซิร์ฟสุ่มแทน (กันค้างตอน API ช้า)
+    STUCK_SECONDS     = 60,    -- สั่งวาร์ปแล้วยังไม่ไปภายในกี่วินาที ถือว่าค้าง ลองวิธีถัดไป
+    CLICK_RECONNECT   = true,  -- ในแมตช์/เซิร์ฟส่วนตัว: กดปุ่ม Reconnect ของ Roblox ก่อน (เหมือนที่เรากดเอง) ไม่พาเข้าค่อยวาร์ปไปล็อบบี้
+    RECONNECT_WAIT    = 45,    -- กดปุ่มแล้วรอกี่วินาทีว่าเกมพากลับเข้าเอง (โหลดแมตช์ในมือถือ/อีมูช้า ไม่ควรตั้งต่ำกว่า 30)
     NO_CHAR_SECONDS   = 240,   -- ไม่มีตัวละครนานเกินนี้ถือว่าเกมค้าง รีจอย (ตั้ง 0 = ปิด ใช้กับเกมที่ไม่มีตัวละคร)
     LOOP_LIMIT        = 5,     -- หลุดกี่ครั้งภายใน LOOP_WINDOW ถึงถือว่า "ติดลูป"
     LOOP_WINDOW       = 600,
@@ -46,7 +40,6 @@ local CFG = {
 
 local FILE        = "aa_rejoin.lua"
 local STATE_FILE  = "aa_rejoin_state.json"
-local VERSION     = "v3.3"   -- โชว์ท้ายบรรทัด "ไป:" บนเม็ดยา ไว้เช็คว่ารันตัวใหม่จริงไหม
 
 local Players      = game:GetService("Players")
 local TS           = game:GetService("TeleportService")
@@ -926,7 +919,7 @@ local function refreshInfo()
             .. "ก่อน" .. (S.lastReason and (" (" .. S.lastReason .. ")") or "")
     end
     local tid, how = resolveTarget()
-    UI.info3.Text = "ไป: " .. tostring(tid) .. " (" .. how .. ") · " .. VERSION
+    UI.info3.Text = "ไป: " .. tostring(tid) .. " (" .. how .. ")"
     local ev = {}
     for i = #S.events, math.max(1, #S.events - 1), -1 do
         local e = S.events[i]
@@ -1050,15 +1043,7 @@ end
 pcall(function()
     TS.TeleportInitFailed:Connect(function(_, result, msg)
         RT.tpFailed = true
-        RT.tpFailName = (tostring(result):gsub("^Enum%.TeleportResult%.", ""))
         log("วาร์ปล้มเหลว:", tostring(result), tostring(msg))
-    end)
-end)
--- ดูว่า Roblox รับคำสั่งวาร์ปจริงไหม (Started / InProgress / Failed) ไว้ใช้วินิจฉัยใน log และบนเม็ดยา
-pcall(function()
-    lp.OnTeleport:Connect(function(state)
-        RT.tpState = (tostring(state):gsub("^Enum%.TeleportState%.", ""))
-        log("สถานะวาร์ป:", tostring(state))
     end)
 end)
 
@@ -1085,26 +1070,103 @@ local function click(btn)
     end
 end
 
--- ปุ่มบนหน้าต่างแจ้งหลุดของ Roblox (CoreGui) เช่น Reconnect
-local function findCoreButton(pats)
-    local ok, b, t = pcall(function()
+-- จำลองการแตะจริงที่กลางปุ่ม (สำรอง เผื่อยิงสัญญาณแล้วปุ่มไม่ตอบสนอง)
+local function realClick(btn)
+    pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        local p, s = btn.AbsolutePosition, btn.AbsoluteSize
+        local x, y = p.X + s.X / 2, p.Y + s.Y / 2
+        local sg = btn:FindFirstAncestorWhichIsA("ScreenGui")
+        if not (sg and sg.IgnoreGuiInset) then
+            local inset = GuiService:GetGuiInset()
+            x, y = x + inset.X, y + inset.Y
+        end
+        VIM:SendMouseButtonEvent(x, y, 0, true, game, 1)
+        task.wait(0.08)
+        VIM:SendMouseButtonEvent(x, y, 0, false, game, 1)
+    end)
+end
+
+-- ปุ่ม "เชื่อมต่อใหม่" บนหน้าต่างแจ้งหลุดของ Roblox (CoreGui)
+-- Roblox ที่ตั้งภาษาไทยจะเขียนปุ่มเป็นภาษาไทย จึงต้องรู้จักทั้งไทยและอังกฤษ (และดูชื่อปุ่มด้วย)
+local RECONNECT_PATS = { "reconnect", "rejoin", "retry", "try again", "เชื่อมต่อ", "เข้าร่วม", "ลองอีกครั้ง", "ลองใหม่" }
+local LEAVE_PATS     = { "leave", "ออก" }
+
+local function hasAny(s, pats)
+    s = tostring(s):lower()
+    for _, p in ipairs(pats) do
+        if s:find(p, 1, true) then return true end
+    end
+    return false
+end
+
+-- คืน (ปุ่ม, คำอธิบาย, รายการปุ่มทั้งหมดที่เห็นบนหน้าต่าง)
+local function findReconnectButton()
+    local found = {}
+    local ok, btn, desc = pcall(function()
         local g = game:GetService("CoreGui"):FindFirstChild("RobloxPromptGui")
         if not g then return nil end
-        for _, o in ipairs(g:GetDescendants()) do
-            if (o:IsA("TextLabel") or o:IsA("TextButton")) and o.Text ~= "" then
-                local tl = o.Text:lower()
-                for _, p in ipairs(pats) do
-                    if tl:find(p, 1, true) then
-                        local btn = btnOf(o)
-                        if btn then return btn, o.Text end
+        local po = g:FindFirstChild("promptOverlay")
+        local root = (po and po:FindFirstChild("ErrorPrompt")) or g
+        for _, o in ipairs(root:GetDescendants()) do
+            if o:IsA("GuiButton") then
+                local shown, a = true, o
+                while a and a ~= root do
+                    if a:IsA("GuiObject") and not a.Visible then
+                        shown = false
+                        break
+                    end
+                    a = a.Parent
+                end
+                if shown then
+                    local txt = o:IsA("TextButton") and o.Text or ""
+                    for _, d in ipairs(o:GetDescendants()) do
+                        if d:IsA("TextLabel") and d.Text ~= "" then txt = txt .. " " .. d.Text end
+                    end
+                    local label = o.Name .. "|" .. txt
+                    found[#found + 1] = label
+                    if hasAny(o.Name .. " " .. txt, RECONNECT_PATS) and not hasAny(txt, LEAVE_PATS) then
+                        return o, label
                     end
                 end
             end
         end
         return nil
     end)
-    if ok then return b, t end
-    return nil
+    if ok and btn then return btn, desc, found end
+    return nil, nil, found
+end
+
+-- กดปุ่ม Reconnect แล้วรอให้เกมพากลับเข้าเอง (ถ้าสำเร็จ สคิปนี้จะถูกปิดไปกับเซิร์ฟเดิม)
+-- คืน true = กดแล้ว (แต่ยังไม่ไป) · false = ไม่เจอปุ่ม
+local function pressReconnect(waitSec)
+    local b, desc, found = findReconnectButton()
+    if not b then
+        if #found > 0 then
+            log("ไม่เจอปุ่ม Reconnect ที่รู้จัก ปุ่มที่มี:", table.concat(found, " / "))
+        else
+            log("ไม่เจอปุ่มบนหน้าต่างหลุด (หน้าต่างอาจหายไปแล้ว หรือ executor เข้า CoreGui ไม่ได้)")
+        end
+        return false
+    end
+    log("กดปุ่มหน้าต่างหลุด:", desc)
+    RT.tpFailed = false
+    click(b)
+    local t0, tried = os.clock(), false
+    while RT.auto and os.clock() - t0 < waitSec do
+        task.wait(1)
+        if RT.tpFailed then break end
+        -- ผ่านไป 8 วิปุ่มยังอยู่ = ยิงสัญญาณไม่ติด ลองแตะจริงอีกวิธี
+        if not tried and os.clock() - t0 >= 8 then
+            tried = true
+            local b2 = findReconnectButton()
+            if b2 then
+                log("ปุ่มยังอยู่ ลองแตะปุ่มจริงอีกวิธี")
+                realClick(b2)
+            end
+        end
+    end
+    return true
 end
 
 -- ===================== ตรวจว่าหลุดไหม =====================
@@ -1145,18 +1207,9 @@ end
 
 local function waitOnline(maxWait)
     local t0 = os.clock()
-    local lastLog = 0
     while RT.auto do
-        if isOnline() then
-            local w = os.clock() - t0
-            if w > 1 then log("เน็ตกลับมาแล้ว รอไป", span(w)) end
-            return true
-        end
+        if isOnline() then return true end
         local waited = os.clock() - t0
-        if waited - lastLog >= 30 then
-            lastLog = waited
-            log("ยังไม่มีเน็ต รอมาแล้ว", span(waited))
-        end
         if waited >= maxWait then return false end
         UI.set("รอเน็ตกลับมา", COL.warn, "เช็คทุก 5 วิ · รอมาแล้ว " .. span(waited))
         task.wait(5)
@@ -1230,9 +1283,6 @@ local function reconnect(info, opts)
     else
         pushEvent(opts.test and "ทดสอบ" or "รีจอยเอง", why)
         log(opts.test and "ทดสอบ: จะวาร์ปจริงตามเป้าหมายรีจอย" or ("รีจอยเอง: " .. why))
-        if opts.test then
-            log("หมายเหตุ: ปุ่มทดสอบสั่งวาร์ปตอนที่ยังต่อเซิร์ฟอยู่ ซึ่งไม่เหมือนตอนหลุดจริง (ตอนนั้นเน็ตขาดแล้ว) ผลอาจต่างกัน")
-        end
     end
 
     -- สคิปฟาร์มที่อยากให้รันหลังรีจอย: ฝากไว้ในคิวของการวาร์ปครั้งถัดไป (ครั้งเดียวต่อการหลุด)
@@ -1241,9 +1291,7 @@ local function reconnect(info, opts)
         log("ฝากสคิปฟาร์มไว้รันหลังรีจอย:", CFG.AFTER_REJOIN_FILE)
     end
 
-    task.spawn(function()
-      -- ครอบด้วย xpcall: ถ้าโค้ดข้างในพังกลางทาง จะขึ้น error บนเม็ดยา/ใน log แทนที่จะค้างเงียบ ๆ ตลอดไป
-      local okT, errT = xpcall(function()
+    guard("reconnect", function()
         -- หลุดถี่ผิดปกติ (ติดลูป): พักก่อนแล้วค่อยลอง ไม่ยิง Teleport รัวๆ
         if S.pending == "drop" and recentCount() >= CFG.LOOP_LIMIT then
             local cd = CFG.LOOP_COOLDOWN
@@ -1257,30 +1305,23 @@ local function reconnect(info, opts)
             end
         end
 
-        -- ลำดับวิธีเข้า (แล้ววนซ้ำวิธีที่ไม่ใช่ "same" ไปเรื่อยๆ)
-        --   อยู่หน้าหลัก/ล็อบบี้ (เป้าหมาย = แมพที่อยู่): เซิร์ฟเดิม -> สุ่มเซิร์ฟ -> เซิร์ฟที่ว่าง
-        --   อยู่ในแมตช์ (เป้าหมาย = ล็อบบี้ คนละแมพ):     เซิร์ฟที่ว่าง -> สุ่มเซิร์ฟ
-        --   (ในแมตช์เริ่มที่ "เซิร์ฟที่ว่าง" เพราะใช้คำสั่งตัวเดียวกับ "เซิร์ฟเดิม" ที่ทดสอบแล้วว่าใช้ได้ในล็อบบี้)
-        local target0 = resolveTarget()
-        local inMatch = target0 ~= game.PlaceId
+        -- ลำดับวิธีเข้า: เซิร์ฟเดิม -> สุ่มเซิร์ฟ -> เซิร์ฟที่ว่าง แล้วสลับสุ่ม/ว่างต่อไป
+        -- แมตช์/เซิร์ฟส่วนตัว (ไม่ใช่หน้าหลักของเกม หรือเป็นเซิร์ฟส่วนตัว) วาร์ปกลับเซิร์ฟเดิมด้วย JobId ไม่ได้
+        local offMain = (game.PrivateServerId ~= "") or (resolveTarget() ~= game.PlaceId)
+        local reconnectFirst = CFG.CLICK_RECONNECT and offMain and CFG.REJOIN_PLACE_ID == 0
         local plan = {}
-        if inMatch then
-            if CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
-            plan[#plan + 1] = "any"
-        else
-            if CFG.TRY_SAME_SERVER and not info.nosame and game.JobId ~= "" then
-                plan[#plan + 1] = "same"
-            end
-            plan[#plan + 1] = "any"
-            if CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
+        if CFG.TRY_SAME_SERVER and not info.nosame and game.JobId ~= "" and not offMain then
+            plan[#plan + 1] = "same"
         end
-        local cycle = {}
-        for _, p in ipairs(plan) do
-            if p ~= "same" then cycle[#cycle + 1] = p end
-        end
-        log("แผนเข้าใหม่:", inMatch and "อยู่ในแมตช์ -> ไปหน้าหลัก" or "อยู่หน้าหลัก",
-            "| ตอนนี้อยู่ PlaceId", game.PlaceId, "-> เป้าหมาย", target0,
-            "| ลำดับ:", table.concat(plan, ">"))
+        if offMain and CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
+        plan[#plan + 1] = "any"
+        if (not offMain) and CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
+        log("แผนรีจอยรอบนี้:", reconnectFirst and "กดปุ่ม Reconnect ก่อน แล้ววาร์ป" or "วาร์ปตามลำดับ",
+            "· PlaceId =", game.PlaceId, "· เซิร์ฟส่วนตัว =", tostring(game.PrivateServerId ~= ""))
+        pcall(function()
+            local _, _, found = findReconnectButton()
+            if #found > 0 then log("ปุ่มบนหน้าต่างหลุด:", table.concat(found, " / ")) end
+        end)
 
         local attempt = 0
         while true do
@@ -1296,37 +1337,29 @@ local function reconnect(info, opts)
                 log("เช็คเน็ตไม่ผ่านนานเกิน", span(CFG.ONLINE_WAIT), "ลองสั่งเข้าเลย")
             end
 
+            -- แมตช์/เซิร์ฟส่วนตัว: กดปุ่ม Reconnect ของ Roblox ก่อน (เหมือนที่เรากดเอง) ไม่พาเข้าค่อยวาร์ปไปล็อบบี้
+            if RT.auto and reconnectFirst then
+                UI.set("หลุด! กดปุ่มเชื่อมต่อใหม่", COL.bad, "ครั้งที่ " .. attempt .. " · ปุ่ม Reconnect ของ Roblox")
+                pressReconnect(CFG.RECONNECT_WAIT)
+            end
+
             if RT.auto then
                 local target, how = resolveTarget()
                 local m = plan[attempt]
-                if not m then m = cycle[((attempt - #plan - 1) % #cycle) + 1] end
+                if not m then m = (CFG.FIND_OPEN_SERVER and attempt % 2 == 1) and "open" or "any" end
                 local mlabel = (m == "same" and "เซิร์ฟเดิม") or (m == "open" and "เซิร์ฟที่ว่าง") or "เซิร์ฟสุ่ม"
-                local head = "ครั้งที่ " .. attempt .. " · " .. mlabel
-                UI.set("หลุด! กำลังเข้าใหม่", COL.bad, head .. " · " .. target .. " (" .. how .. ")")
-                RT.tpFailed, RT.tpFailName, RT.tpState = false, nil, nil
+                UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
+                    "ครั้งที่ " .. attempt .. " · " .. mlabel .. " · " .. target .. " (" .. how .. ")")
+                RT.tpFailed = false
                 local ok, err
                 if m == "same" then
                     ok, err = pcall(function() TS:TeleportToPlaceInstance(game.PlaceId, game.JobId, lp) end)
                 elseif m == "open" then
-                    -- ค้นหาเซิร์ฟแยกเธรด + จับเวลา (กันค้างถ้า API ตอบช้า) แล้วโชว์ขั้นตอนบนเม็ดยา
-                    local done, id, why2 = false, nil, nil
-                    task.spawn(function()
-                        id, why2 = findOpenServer(target)
-                        done = true
-                    end)
-                    local tf = os.clock()
-                    while RT.auto and not done and os.clock() - tf < CFG.FIND_TIMEOUT do
-                        task.wait(0.5)
-                        UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
-                            head .. " · หาเซิร์ฟ " .. math.floor(os.clock() - tf) .. " วิ")
-                    end
-                    if not done then why2 = "หมดเวลา " .. CFG.FIND_TIMEOUT .. " วิ" end
+                    local id, why2 = findOpenServer(target)
                     if id then
-                        log("เจอเซิร์ฟที่ว่าง:", tostring(id):sub(1, 8) .. "...")
                         ok, err = pcall(function() TS:TeleportToPlaceInstance(target, id, lp) end)
                     else
                         mlabel = "เซิร์ฟสุ่ม"
-                        head = "ครั้งที่ " .. attempt .. " · " .. mlabel
                         log("หาเซิร์ฟที่ว่างไม่ได้ (" .. tostring(why2) .. ") ใช้เซิร์ฟสุ่มแทน")
                         ok, err = pcall(function() TS:Teleport(target, lp) end)
                     end
@@ -1337,48 +1370,19 @@ local function reconnect(info, opts)
 
                 -- รอให้วาร์ปเสร็จ (ถ้าสำเร็จสคิปนี้จะถูกปิดไปกับเซิร์ฟเดิม) ล้มเหลวหรือค้างเกิน STUCK_SECONDS ไปวิธีถัดไป
                 local t0 = os.clock()
-                local silent = false
                 while RT.auto and os.clock() - t0 < CFG.STUCK_SECONDS do
                     task.wait(1)
                     local waited = os.clock() - t0
-                    -- โชว์บนเม็ดยาว่า Roblox ตอบอะไรกลับมา (ไม่ตอบ / Started / InProgress / ชื่อ error)
-                    local st = RT.tpFailed and ("ล้มเหลว " .. tostring(RT.tpFailName or "?"))
-                        or RT.tpState or "Roblox ยังไม่ตอบ"
-                    UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
-                        head .. " · รอ " .. math.floor(waited) .. "/" .. CFG.STUCK_SECONDS .. " วิ · " .. st)
                     if (RT.tpFailed or not ok) and waited >= 3 then break end
-                    -- ในแมตช์: ถ้า Roblox เงียบสนิทเลย ไม่ต้องรอครบ ข้ามไปวิธีถัดไป
-                    if inMatch and ok and not RT.tpFailed and RT.tpState == nil and waited >= CFG.NO_REPLY_SECONDS then
-                        silent = true
-                        break
-                    end
                 end
                 if RT.auto then
-                    log(RT.tpFailed and ("วาร์ปล้มเหลว " .. tostring(RT.tpFailName or ""))
-                        or ((not ok) and ("สั่งวาร์ปไม่ได้: " .. tostring(err)))
-                        or (silent and ("Roblox เงียบ ไม่ตอบคำสั่งวาร์ปใน " .. CFG.NO_REPLY_SECONDS .. " วิ")
-                            or ("ค้างเกิน " .. CFG.STUCK_SECONDS .. " วิ (สถานะ: " .. tostring(RT.tpState) .. ")")),
-                        "-> ไปวิธีถัดไป")
+                    log(RT.tpFailed and "วาร์ปล้มเหลว" or ((not ok) and "สั่งวาร์ปไม่ได้" or "ค้างเกิน " .. CFG.STUCK_SECONDS .. " วิ"), "-> ไปวิธีถัดไป")
                 end
 
                 -- วิธีสำรอง: กดปุ่ม Reconnect/Rejoin บนหน้าต่างแจ้งหลุด
-                local b, bt = findCoreButton({ "reconnect", "rejoin" })
-                if b and RT.auto then
-                    log("กดปุ่มหน้าต่างหลุด:", bt)
-                    click(b)
-                    task.wait(CFG.BUTTON_WAIT)
+                if RT.auto and CFG.CLICK_RECONNECT then
+                    pressReconnect(20)
                 end
-            end
-
-            -- ปุ่มทดสอบ: ลองครบทุกวิธีรอบเดียวแล้วจบ (ไม่วนไปเรื่อยๆ จนค้างโหมดรีจอย)
-            if opts.test and attempt >= #plan then
-                log("ทดสอบจบ: ลองครบทุกวิธีแล้วแต่ยังไม่ได้วาร์ป (ตอนทดสอบยังต่อเซิร์ฟอยู่ อาจไม่เหมือนตอนหลุดจริง ให้ลองปิดไวไฟแทน)")
-                pushEvent("ทดสอบจบ", "ยังไม่ได้วาร์ป")
-                S.disconnectAt, S.pending = nil, nil
-                saveState()
-                UI.set("เฝ้าดูการหลุดอยู่", COL.ok, "ทดสอบจบ · ลองปิดไวไฟเพื่อทดสอบหลุดจริง")
-                RT.rejoining = false
-                return
             end
 
             if RT.auto then
@@ -1387,12 +1391,6 @@ local function reconnect(info, opts)
                 task.wait(delay)
             end
         end
-      end, function(e) return tostring(e) end)
-      if not okT then
-        log("ERROR รีจอย:", tostring(errT):sub(1, 160))
-        UI.set("รีจอยผิดพลาด", COL.bad, tostring(errT):sub(1, 60))
-        RT.rejoining = false
-      end
     end)
 end
 
@@ -1410,7 +1408,7 @@ end
 
 -- ===================== เริ่มทำงาน =====================
 local function main()
-    log("เวอร์ชัน", VERSION, "· PlaceId =", game.PlaceId, "· GameId =", game.GameId)
+    log("PlaceId =", game.PlaceId, "· GameId =", game.GameId)
 
     -- เช็ค executor
     local caps = {
@@ -1425,6 +1423,9 @@ local function main()
     end
     local hasVU = pcall(function() game:GetService("VirtualUser") end)
     if not hasVU then table.insert(missing, "VirtualUser") end
+    local coreOk = false
+    pcall(function() coreOk = game:GetService("CoreGui"):FindFirstChild("RobloxPromptGui") ~= nil end)
+    if not coreOk then table.insert(missing, "CoreGui(RobloxPromptGui)") end
     if #missing == 0 then
         log("executor รองรับครบทุกฟังก์ชัน")
     else
@@ -1520,10 +1521,6 @@ local function main()
                 local up, msg = disconnectInfo()
                 if up then
                     noCharSince = nil
-                    if not downSince then
-                        log("พบหน้าต่างหลุดของ Roblox:", msg ~= "" and msg:sub(1, 80) or "(ไม่มีข้อความ)",
-                            "| PlaceId", game.PlaceId)
-                    end
                     downSince = downSince or os.clock()
                     if os.clock() - downSince >= CFG.CONFIRM_SECONDS then
                         downSince = nil
