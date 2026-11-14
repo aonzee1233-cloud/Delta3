@@ -1,6 +1,9 @@
--- v4: เพิ่มปุ่ม "สคิป" เลือกสคิปหลักที่จะรันคู่กัน (เลือกจากไฟล์ใน workspace หรือพิมพ์ชื่อไฟล์/ลิงก์เอง จำแยกตามเกม)
---     รีจอยเข้าเกมมาแล้ว สคิปรีจอยจะรันสคิปหลักให้เอง (เลือกโหมดได้: ปิด / หลังรีจอยเท่านั้น / ทุกครั้งที่เข้าเกม)
--- v3: แก้ "หลุดในแมตช์แล้วไม่รีจอย" ->ในแมตช์/เซิร์ฟส่วนตัวจะกดปุ่ม Reconnect ของ Roblox ก่อน (รู้จักตัวหนังสือไทย/อังกฤษ) แล้วค่อยวาร์ปไปล็อบบี้
+-- v4: ระบบกันหลุดฉลาดขึ้น
+--   · ตรวจหลุดหลายสัญญาณ: เช็คว่า "ยังเชื่อมเซิร์ฟอยู่จริงไหม" -> ข้ามหน้าต่างวาร์ปล้มเหลวที่ไม่ใช่การหลุด · จับหลุดเงียบที่ไม่มีหน้าต่างแจ้ง · ไม่ยุ่งตอนเกมวาร์ปเอง
+--   · อ่านผลวาร์ปล้มเหลวจริง (เต็ม/ปิด/ถี่เกิน/ไม่มีสิทธิ์) แล้วเลือกทางต่อเอง · จำเซิร์ฟที่เข้าไม่ได้ · เรียงวิธีเข้าตามที่เคยสำเร็จบ่อย
+--   · หาเซิร์ฟว่างดีขึ้น (ดึงหลายหน้า ตัดเซิร์ฟแลค/ใกล้เต็ม รู้จักโดนลิมิต 429) · พักก่อนลองใหม่แบบสุ่มเวลาเล็กน้อย (หลายบัญชีไม่แห่พร้อมกัน)
+--   · กัน AFK ปรับระดับเองถ้ายังโดนเตะ · ติดลูปพักนานขึ้นเรื่อยๆ · หยุดเองถ้าโดนเตะเชิงโกง · webhook ส่งซ้ำเมื่อเน็ตกลับ · กันค้างโหลด
+-- v3: แก้ "หลุดในแมตช์แล้วไม่รีจอย" -> ในแมตช์/เซิร์ฟส่วนตัวจะกดปุ่ม Reconnect ของ Roblox ก่อน (รู้จักตัวหนังสือไทย/อังกฤษ) แล้วค่อยวาร์ปไปล็อบบี้
 -- Auto Rejoin v2 (เบา ไม่เกะกะ): เน็ตหลุด / โดนเตะ / เซิร์ฟล่ม -> เข้าเกมใหม่เอง (ใช้ได้กับทุกแมพ ทุกเกม)
 --   1) เฝ้าหน้าต่างแจ้งหลุดของ Roblox แล้วแยกสาเหตุ (เน็ต / เซิร์ฟปิด / โดนเตะ / บัญชีเข้าซ้ำ / แบน) ตัดสินใจเอง
 --   2) รอเน็ตกลับก่อนค่อยสั่งเข้า · หาเซิร์ฟสาธารณะที่ยังว่างถ้าเซิร์ฟเดิมเข้าไม่ได้ · จับเกมค้าง · กันวนลูป
@@ -33,10 +36,17 @@ local CFG = {
     RAM_LIMIT_MB      = 0,     -- RAM สูงเกินค่านี้ (MB) นาน ~1.5 นาที ให้รีจอยก่อนเกมแครช (0 = ปิด เช่น มือถือลอง 2500)
     RAM_MIN_UPTIME    = 600,   -- ต้องอยู่ในเซิร์ฟมาแล้วอย่างน้อยกี่วินาทีถึงรีจอยเพราะ RAM (กันวนลูป)
     ANTI_IDLE         = true,  -- กันโดนเตะเพราะ AFK
-    MAIN_SCRIPT       = "",    -- สคิปหลักเริ่มต้น (ชื่อไฟล์ใน workspace หรือลิงก์ https) ปกติเลือกจากปุ่ม "สคิป" บนหน้าจอ ไม่ต้องแก้ตรงนี้
-    MAIN_DELAY        = 5,     -- เข้าเกมแล้วรอกี่วินาทีก่อนรันสคิปหลัก (ให้ตัวละครโหลดก่อน)
-    MAIN_ON_MANUAL    = false, -- ตอนกดรันสคิปรีจอยเอง ให้เปิดสคิปหลักด้วยไหม (ปกติไม่ เพราะรันสคิปหลักเองอยู่แล้ว)
+    IDLE_LEVEL        = 0,     -- ระดับกัน AFK: 0 = ปรับเอง (เริ่ม 1 แล้วเพิ่มถ้ายังโดนเตะ AFK) · 1-3 = บังคับระดับ (สูง = ถี่ขึ้น/วิธีเยอะขึ้น)
+    SMART_DETECT      = true,  -- ตรวจหลุดหลายสัญญาณ: ดูว่ายังเชื่อมเซิร์ฟอยู่จริงไหมก่อนตัดสิน (false = ทำงานแบบ v3)
+    SILENT_SECONDS    = 15,    -- หลุดจากเซิร์ฟจริงแต่ไม่มีหน้าต่างแจ้ง นานกี่วินาทีถึงรีจอย (0 = ปิด)
+    LOAD_TIMEOUT      = 240,   -- เกมโหลดไม่เสร็จนานกี่วินาทีถือว่าค้าง สั่งเข้าใหม่ (0 = ปิด)
+    LEARN_METHODS     = true,  -- จำว่าวิธีเข้าแบบไหน (เซิร์ฟเดิม/ว่าง/สุ่ม) สำเร็จบ่อย แล้วลองวิธีนั้นก่อน
+    BAD_SERVER_TTL    = 1800,  -- เซิร์ฟที่เข้าไม่ได้ (เต็ม/ปิด/ค้าง) จำไว้กี่วินาที ไม่เลือกซ้ำ
+    LOOP_BACKOFF      = true,  -- ติดลูปซ้ำๆ พักนานขึ้นเรื่อยๆ (สูงสุด 30 นาที)
+    HALT_ON_SUSPECT   = true,  -- ข้อความเตะมีคำเชิงโกง/ผิดกติกา -> หยุดรีจอย (กันบัญชีโดนซ้ำ) แตะสวิตช์เพื่อเริ่มใหม่
+    AFTER_REJOIN_FILE = "",    -- ชื่อไฟล์สคิปฟาร์มใน workspace ที่อยากให้รันหลังรีจอย (เว้นว่างถ้าอยู่ใน autoexec แล้ว)
     WEBHOOK           = "",    -- ลิงก์ Discord webhook (แจ้งเฉพาะ หลุด / กลับมาได้ / ติดลูป / หยุดรีจอย) เว้นว่าง = ไม่ใช้
+    WEBHOOK_TAG       = true,  -- ใส่ชื่อบัญชีนำหน้าข้อความ webhook (ช่วยตอนรันหลายบัญชี)
     DISABLE_OLD       = true,  -- ปิดสคิปเก่า (aa_failsafe / aa_guard) ไม่ให้รันซ้ำหลังวาร์ป
     DEBUG             = true,
     SHOW_UI           = true,
@@ -53,14 +63,40 @@ local GuiService   = game:GetService("GuiService")
 local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
 local lp = Players.LocalPlayer
-if not game:IsLoaded() then game.Loaded:Wait() end
+-- กันค้างโหลด: ถ้า executor รันสคริปต์ก่อนเกมโหลดเสร็จ แล้วเกมค้างหน้าโหลดนานเกิน LOAD_TIMEOUT ให้สั่งเข้าใหม่เอง
+if not game:IsLoaded() then
+    if (CFG.LOAD_TIMEOUT or 0) > 0 then
+        task.spawn(function()
+            local t0 = os.clock()
+            while not game:IsLoaded() do
+                task.wait(5)
+                if not game:IsLoaded() and os.clock() - t0 >= CFG.LOAD_TIMEOUT then
+                    t0 = os.clock()
+                    local target = game.PlaceId
+                    if CFG.REJOIN_PLACE_ID ~= 0 then
+                        target = CFG.REJOIN_PLACE_ID
+                    elseif CFG.USE_ROOT_PLACE then
+                        pcall(function()
+                            local r = HS:JSONDecode(readfile(STATE_FILE)).roots[tostring(game.GameId)]
+                            if type(r) == "number" then target = r end
+                        end)
+                    end
+                    warn("[REJOIN] ค้างโหลดเกินกำหนด สั่งเข้าใหม่ PlaceId =", target)
+                    pcall(function() TS:Teleport(target, lp) end)
+                end
+            end
+        end)
+    end
+    game.Loaded:Wait()
+end
 
 local genv = (getgenv and getgenv()) or _G
-if genv.AA_REJOIN_RUNNING then return end
-genv.AA_REJOIN_RUNNING = true
--- true = ผู้ใช้กดรันไฟล์รวมเอง / false = รันต่อหลังวาร์ปหรือจาก autoexec (ตัวห่อด้านล่างสุดเป็นคนตั้งธง)
-local MANUAL = genv.AA_REJOIN_MANUAL == true
-genv.AA_REJOIN_MANUAL = nil
+-- กันรันซ้ำ "ในเซิร์ฟเดียวกัน" (ผูกกับ JobId) เพื่อให้ executor ที่เก็บ getgenv ข้ามการวาร์ป ยังรันรอบใหม่ได้หลังรีจอย
+local SESSION = (game.JobId ~= "" and game.JobId or "x") .. ":" .. tostring(game.PlaceId)
+local prevRun = genv.AA_REJOIN_RUNNING
+if prevRun == SESSION then return end
+genv.AA_REJOIN_RUNNING = SESSION
+local LEGACY = (prevRun == true)   -- ค่าที่รุ่นเก่า (v3) ทิ้งไว้
 
 local T0 = os.clock()
 local function fmt(sec)
@@ -92,11 +128,18 @@ S.drops = S.drops or 0
 S.events = S.events or {}
 S.roots = S.roots or {}
 S.recent = S.recent or {}
-S.mains = S.mains or {}             -- สคิปหลักที่เลือกไว้ แยกตาม GameId (false = เลือก "ไม่ใช้")
-if S.runMode == nil then S.runMode = 2 end   -- 1 = ปิด · 2 = หลังรีจอยเท่านั้น · 3 = ทุกครั้งที่เข้าเกม
+S.recentK = S.recentK or {}      -- สาเหตุของแต่ละครั้งใน S.recent (เรียงตรงกัน)
+while #S.recentK < #S.recent do table.insert(S.recentK, 1, "?") end
+while #S.recentK > #S.recent do table.remove(S.recentK, 1) end
+S.bad = S.bad or {}              -- เซิร์ฟที่เข้าไม่ได้ -> เวลาหมดอายุ
+S.badTarget = S.badTarget or {}  -- PlaceId เป้าหมายที่เข้าไม่ได้ -> เวลาที่จด
+S.mstat = S.mstat or {}          -- สถิติวิธีเข้าเกม (same/open/any)
+S.outbox = S.outbox or {}        -- ข้อความ webhook ที่ยังส่งไม่สำเร็จ
+S.loopStreak = S.loopStreak or 0
+S.idleLevel = S.idleLevel or 1
 if S.auto == nil then S.auto = true end
 local function saveState()
-    pcall(writefile, STATE_FILE, HS:JSONEncode(S))
+    pcall(function() writefile(STATE_FILE, HS:JSONEncode(S)) end)
 end
 local function pushEvent(kind, msg)
     table.insert(S.events, { t = os.time(), k = kind, m = msg })
@@ -105,11 +148,14 @@ local function pushEvent(kind, msg)
 end
 -- นับจำนวนครั้งที่หลุดภายในช่วง LOOP_WINDOW (ล้างอันเก่าทิ้งด้วย)
 local function recentCount()
-    local now, keep = os.time(), {}
-    for _, t in ipairs(S.recent) do
-        if now - t <= CFG.LOOP_WINDOW then keep[#keep + 1] = t end
+    local now, keep, keepK = os.time(), {}, {}
+    for i, t in ipairs(S.recent) do
+        if now - t <= CFG.LOOP_WINDOW then
+            keep[#keep + 1] = t
+            keepK[#keepK + 1] = S.recentK[i] or "?"
+        end
     end
-    S.recent = keep
+    S.recent, S.recentK = keep, keepK
     return #keep
 end
 
@@ -118,32 +164,28 @@ local RT = { auto = S.auto, rejoining = false, idleHits = 0, halted = nil, tpFai
 
 -- จะรีจอยไปแมพไหน (ตัดสินตอนหลุดจริง จึงอ่านจากค่าที่เก็บไว้ ไม่ต้องใช้เน็ต)
 local function resolveTarget()
-    if type(CFG.REJOIN_PLACE_ID) == "number" and CFG.REJOIN_PLACE_ID ~= 0 then
+    -- เป้าหมายที่เพิ่งเข้าไม่ได้ (ไม่มีสิทธิ์/ไม่เจอแมพ) ภายใน 1 ชม. -> ข้ามไปใช้แมพที่อยู่แทน
+    local function bad(id)
+        local ts = S.badTarget[tostring(id)]
+        return ts ~= nil and os.time() - ts < 3600
+    end
+    if type(CFG.REJOIN_PLACE_ID) == "number" and CFG.REJOIN_PLACE_ID ~= 0 and not bad(CFG.REJOIN_PLACE_ID) then
         return CFG.REJOIN_PLACE_ID, "ตั้งเอง"
     end
-    if CFG.USE_ROOT_PLACE then
+    if CFG.USE_ROOT_PLACE and CFG.REJOIN_PLACE_ID == 0 then
         local r = S.roots[tostring(game.GameId)]
-        if r then return r, "หน้าหลักเกม" end
+        if r and not bad(r) then return r, "หน้าหลักเกม" end
     end
     return game.PlaceId, "แมพปัจจุบัน"
-end
-
--- สคิปหลักของเกมนี้: เลือกจาก UI (เก็บแยกตามเกม) ถ้ายังไม่เคยเลือกใช้ค่า CFG.MAIN_SCRIPT
-local GID = tostring(game.GameId)
-local MODE_NAMES = { "ปิด (ไม่รันสคิปหลัก)", "หลังรีจอยเท่านั้น", "ทุกครั้งที่เข้าเกม" }
-local MODE_SHORT = { "ปิด", "หลังรีจอย", "ทุกครั้ง" }
-local function getMain()
-    local v = S.mains[GID]
-    if v == false then return nil end
-    if type(v) == "string" and v ~= "" then return v end
-    if type(CFG.MAIN_SCRIPT) == "string" and CFG.MAIN_SCRIPT ~= "" then return CFG.MAIN_SCRIPT end
-    return nil
 end
 
 -- ===================== แยกสาเหตุที่หลุด =====================
 -- ตัดสินจากข้อความ + เลข Error Code ในข้อความ (ถ้าไม่ตรงอะไรเลย = ไม่ทราบสาเหตุ แล้วรีจอยตามปกติ)
 -- stop = true  -> หยุดรีจอย (เข้าซ้ำ/แบน ถ้ารีจอยต่อจะวนแย่งกันหรือโดนซ้ำ)
 -- nosame = true -> เซิร์ฟเดิมน่าจะปิดไปแล้ว ไม่ต้องลองกลับเซิร์ฟเดิม
+-- คำในข้อความเตะที่บ่งว่าโดนจับเรื่องโกง/ผิดกติกา (ใช้กับ HALT_ON_SUSPECT)
+local SUSPECT = { "exploit", "cheat", "hack", "suspicious", "violat", "unfair", "anti-cheat", "anticheat", "โกง", "ผิดกติกา", "น่าสงสัย" }
+
 local function classify(msg)
     msg = msg or ""
     local l = msg:lower()
@@ -169,15 +211,24 @@ local function classify(msg)
         r = { k = "idle", label = "AFK โดนเตะ" }
     elseif codeIn(267, 268) or has("kick") then
         r = { k = "kick", label = "โดนเตะ" }
+        if CFG.HALT_ON_SUSPECT and has(table.unpack(SUSPECT)) then
+            r.stop, r.label = true, "โดนเตะ (เชิงโกง?)"
+        end
+    elseif codeIn(772) or has("is full") then
+        r = { k = "full", label = "เซิร์ฟเต็ม", nosame = true }
     elseif codeIn(274, 275, 771) or has("shut down", "shutdown", "maintenance") then
         r = { k = "server", label = "เซิร์ฟปิด/ล่ม", nosame = true }
-    elseif codeIn(277, 279, 280, 17) or has("connection", "internet", "network", "timeout", "timed out") then
+    elseif has("memory") then
+        r = { k = "mem", label = "RAM เต็ม" }
+    elseif codeIn(260, 261, 262, 263, 266, 277, 279, 280, 17) or has("connection", "internet", "network", "timeout", "timed out") then
         r = { k = "net", label = "เน็ตหลุด" }
     else
         r = { k = "unknown", label = "ไม่ทราบสาเหตุ" }
     end
     r.code = code
     r.msg = msg
+    -- รหัส 5xx-7xx = เข้าเกม/วาร์ปล้มเหลว (ไม่ได้ทำให้หลุดจากเซิร์ฟที่อยู่เสมอไป)
+    r.soft = (code ~= nil and code >= 512 and code < 800) or has("teleport")
     return r
 end
 local function mkInfo(k, label) return { k = k, label = label, msg = "" } end
@@ -664,9 +715,9 @@ local function buildUI()
             TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
         }, mainView)
     end
-    UI.info1, UI.info2, UI.info3, UI.info4 = infoLine(0), infoLine(17), infoLine(34), infoLine(51)
+    UI.info1, UI.info2, UI.info3 = infoLine(0), infoLine(17), infoLine(34)
     local histCard = new("Frame", {
-        Position = UDim2.fromOffset(14, 70), Size = UDim2.new(1, -28, 0, 30),
+        Position = UDim2.fromOffset(14, 56), Size = UDim2.new(1, -28, 0, 44),
         BackgroundColor3 = "card", BorderSizePixel = 0,
     }, mainView)
     round(histCard, UDim.new(0, 10))
@@ -736,182 +787,29 @@ local function buildUI()
     end)
     dimSw.set(S.dim ~= false, false)
 
-    -- มุมมองสคิปหลัก: เลือกว่าจะให้รันสคิปไหนคู่กับสคิปรีจอย (เก็บแยกตามเกม)
-    local scriptView = new("Frame", {
-        Position = UDim2.fromOffset(14, 46), Size = UDim2.new(1, -28, 0, 138),
-        BackgroundColor3 = "card", BorderSizePixel = 0, Visible = false,
-    }, full)
-    round(scriptView, UDim.new(0, 12))
-
-    local runSeg = segmented(scriptView, {
-        labels = MODE_SHORT,
-        pos = UDim2.fromOffset(8, 6), size = UDim2.new(1, -16, 0, 24),
-        track = "segIn", ts = 12,
-        onPick = function(i)
-            S.runMode = i
-            saveState()
-            UI.addLog("โหมดสคิปหลัก: " .. MODE_NAMES[i])
-        end,
-    })
-    runSeg.set(S.runMode or 2, false)
-
-    local list = new("ScrollingFrame", {
-        Position = UDim2.fromOffset(8, 34), Size = UDim2.new(1, -16, 0, 72),
-        BackgroundTransparency = 1, BorderSizePixel = 0, Active = true,
-        ScrollBarThickness = 2, ScrollBarImageColor3 = "dim",
-        CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-    }, scriptView)
-    new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, list)
-
-    local rows = {}
-    local function clearRows()
-        for _, r in ipairs(rows) do r:Destroy() end
-        rows = {}
-    end
-    local function addRow(label, selected, order, onPick, dimmed)
-        local b = new("TextButton", {
-            Text = label, Font = selected and F.bold or F.semi, TextSize = 12,
-            TextColor3 = selected and "acc" or (dimmed and "dim" or "text"),
-            BackgroundColor3 = selected and "acc" or "segIn",
-            BackgroundTransparency = selected and 0.84 or 0,
-            BorderSizePixel = 0, AutoButtonColor = false, LayoutOrder = order,
-            Size = UDim2.new(1, -4, 0, 26), TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd, ClipsDescendants = true,
-        }, list)
-        round(b, UDim.new(0, 8))
-        new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 8) }, b)
-        if onPick then
-            pressFx(b, 0.97)
-            b.Activated:Connect(onPick)
-        end
-        rows[#rows + 1] = b
-        return b
-    end
-
-    -- อ่านรายชื่อไฟล์สคิปใน workspace (nil = executor ไม่มี listfiles)
-    local function scanFiles()
-        if not listfiles then return nil end
-        local skip = { [FILE] = true, [STATE_FILE] = true, ["aa_failsafe.lua"] = true, ["aa_guard.lua"] = true }
-        for _, dir in ipairs({ "", ".", "workspace" }) do
-            local ok, res = pcall(listfiles, dir)
-            if ok and type(res) == "table" and #res > 0 then
-                local out = {}
-                for _, p in ipairs(res) do
-                    local name = tostring(p):match("([^/\\]+)$")
-                    local ext = name and name:lower():match("%.(%w+)$")
-                    if name and (ext == "lua" or ext == "luau" or ext == "txt") and not skip[name] then
-                        out[#out + 1] = name
-                    end
-                end
-                table.sort(out, function(a, b) return a:lower() < b:lower() end)
-                return out
-            end
-        end
-        return {}
-    end
-
-    function UI.chooseMain(name)
-        S.mains[GID] = name or false
-        if name and (S.runMode or 2) == 1 then
-            S.runMode = 2   -- เลือกสคิปแล้วแต่โหมดยังปิดอยู่ เปิดให้เลย
-            runSeg.set(2, true)
-        end
-        saveState()
-        UI.addLog("สคิปหลัก (เกมนี้): " .. (name or "ไม่ใช้"))
-        UI.renderScripts()
-    end
-
-    function UI.renderScripts()
-        clearRows()
-        local cur = getMain()
-        local files = scanFiles()
-        local inList = false
-        for _, name in ipairs(files or {}) do
-            if name == cur then inList = true end
-        end
-        addRow("ไม่ใช้สคิปหลัก", cur == nil, 0, function() UI.chooseMain(nil) end)
-        local order = 1
-        if cur and not inList then
-            -- เลือกไว้แล้วแต่ไม่อยู่ในรายการ (ลิงก์ / พิมพ์เอง / ไฟล์หาย)
-            local missing = false
-            if not cur:match("^https?://") and isfile then
-                local ok, ex = pcall(isfile, cur)
-                missing = not (ok and ex)
-            end
-            addRow(cur .. (missing and "  (ไม่พบไฟล์)" or ""), true, order, function() UI.chooseMain(cur) end)
-            order = order + 1
-        end
-        for _, name in ipairs(files or {}) do
-            addRow(name, name == cur, order, function() UI.chooseMain(name) end)
-            order = order + 1
-        end
-        if not files then
-            addRow("executor ไม่มี listfiles: พิมพ์ชื่อไฟล์ด้านล่าง", false, order, nil, true)
-        elseif #files == 0 and not cur then
-            addRow("ไม่พบไฟล์ .lua/.txt ใน workspace", false, order, nil, true)
-        end
-    end
-
-    local scBottom = new("Frame", {
-        Position = UDim2.fromOffset(8, 110), Size = UDim2.new(1, -16, 0, 24), BackgroundTransparency = 1,
-    }, scriptView)
-    local box = new("TextBox", {
-        Text = "", PlaceholderText = "ชื่อไฟล์/ลิงก์", PlaceholderColor3 = "dim",
-        ClearTextOnFocus = false, Font = F.reg, TextSize = 12, TextColor3 = "text",
-        TextXAlignment = Enum.TextXAlignment.Left, ClipsDescendants = true,
-        BackgroundColor3 = "segIn", BorderSizePixel = 0, Size = UDim2.new(0.44, -3, 1, 0),
-    }, scBottom)
-    round(box, UDim.new(0, 10))
-    new("UIPadding", { PaddingLeft = UDim.new(0, 9), PaddingRight = UDim.new(0, 9) }, box)
-    box.FocusLost:Connect(function()
-        local t = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
-        box.Text = ""
-        -- วางทั้งบรรทัดแบบ loadstring(game:HttpGet("ลิงก์"))() มาได้เลย จะดึงเฉพาะลิงก์ในวงเล็บ HttpGet ไปใช้
-        local u = t:match("HttpGet%w*%s*%(%s*[\"']([^\"']+)[\"']")
-        if u then t = u end
-        if t ~= "" then UI.chooseMain(t) end
-    end)
-    local runFlash
-    local _, rf = tintedBtn(scBottom, "รันเลย", "acc", UDim2.new(0.44, 3, 0, 0), UDim2.new(0.28, -3, 1, 0), false,
-        function()
-            local ok = UI.act.runMain and UI.act.runMain()
-            if runFlash then runFlash(ok and "รันแล้ว" or "ไม่ได้") end
-        end)
-    runFlash = rf
-    tintedBtn(scBottom, "กลับ", "dim", UDim2.new(0.72, 3, 0, 0), UDim2.new(0.28, -3, 1, 0), false,
-        function() if UI.showView then UI.showView("main") end end)
-
     -- ปุ่มด้านล่าง
     local actions = new("Frame", {
         Position = UDim2.fromOffset(14, 154), Size = UDim2.new(1, -28, 0, 30), BackgroundTransparency = 1,
     }, full)
-    local view, setBtn = "main", nil
-    local function showView(v)
-        view = v
-        mainView.Visible = (v == "main")
-        setView.Visible = (v == "set")
-        scriptView.Visible = (v == "script")
-        actions.Visible = (v ~= "script")
-        if setBtn then setBtn.Text = (v == "set") and "กลับ" or "ตั้งค่า" end
-        if v == "script" then UI.renderScripts() end
-    end
-    UI.showView = showView
-
-    local BW = UDim2.new(0.25, -3, 1, 0)
+    local BW = UDim2.new(1 / 3, -4, 1, 0)
     tintedBtn(actions, "ทดสอบ", "warn", UDim2.new(0, 0, 0, 0), BW, true,
         function() if UI.act.test then UI.act.test() end end)
     local copyFlash
-    local _, cf = tintedBtn(actions, "คัดลอก", "acc", UDim2.new(0.25, 0, 0, 0), BW, false,
+    local _, cf = tintedBtn(actions, "คัดลอก log", "acc", UDim2.new(1 / 3, 2, 0, 0), BW, false,
         function()
             local r = UI.act.copy and UI.act.copy()
-            if copyFlash then copyFlash(r and "แล้ว" or "ไม่ได้") end
+            if copyFlash then copyFlash(r and "คัดลอกแล้ว" or "คัดลอกไม่ได้") end
         end)
     copyFlash = cf
-    tintedBtn(actions, "สคิป", "ok", UDim2.new(0.5, 0, 0, 0), BW, false,
-        function() showView("script") end)
-    setBtn = tintedBtn(actions, "ตั้งค่า", "dim", UDim2.new(0.75, 0, 0, 0), BW, false,
-        function() showView(view == "set" and "main" or "set") end)
+    local inSettings = false
+    local setBtn
+    setBtn = tintedBtn(actions, "ตั้งค่า", "dim", UDim2.new(2 / 3, 4, 0, 0), BW, false,
+        function()
+            inSettings = not inSettings
+            mainView.Visible = not inSettings
+            setView.Visible = inSettings
+            setBtn.Text = inSettings and "กลับ" or "ตั้งค่า"
+        end)
 
     -- ---------- สเกล/ตำแหน่ง ----------
     UI.applyScale = function()
@@ -1093,13 +991,7 @@ local function refreshInfo()
             .. "ก่อน" .. (S.lastReason and (" (" .. S.lastReason .. ")") or "")
     end
     local tid, how = resolveTarget()
-    UI.info3.Text = "ไป: " .. tostring(tid) .. " (" .. how .. ")"
-    local mn = getMain()
-    if mn then
-        UI.info4.Text = "สคิปหลัก: " .. mn .. " · " .. (MODE_SHORT[S.runMode or 2] or "")
-    else
-        UI.info4.Text = "สคิปหลัก: ยังไม่ได้เลือก (กดปุ่ม \"สคิป\")"
-    end
+    UI.info3.Text = "ไป: " .. tostring(tid) .. " (" .. how .. ")" .. (RT.idleLevel and (" · AFK L" .. RT.idleLevel) or "")
     local ev = {}
     for i = #S.events, math.max(1, #S.events - 1), -1 do
         local e = S.events[i]
@@ -1202,17 +1094,47 @@ UI.act.auto = function()
 end
 
 -- ===================== แจ้งเตือน (ไม่บังคับ) =====================
+-- ข้อความเก็บในคิว (บันทึกลงไฟล์) ถ้าส่งไม่สำเร็จ เช่น เน็ตยังไม่กลับ จะส่งซ้ำเองทีหลัง ไม่หายเงียบ
+local function sendHook(text)
+    local req = reqFn()
+    if not req then return false end
+    local ok, res = pcall(req, {
+        Url = CFG.WEBHOOK, Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body = HS:JSONEncode({ content = text }),
+    })
+    if not ok or type(res) ~= "table" then return false end
+    local sc = res.StatusCode
+    return type(sc) == "number" and sc >= 200 and sc < 300
+end
+local flushing = false
+local function flushOutbox()
+    if flushing or CFG.WEBHOOK == "" or #S.outbox == 0 then return end
+    flushing = true
+    task.spawn(function()
+        pcall(function()
+            local sent = 0
+            while #S.outbox > 0 and sent < 10 do
+                local item = S.outbox[1]
+                local text = tostring(item.m)
+                if os.time() - (item.t or os.time()) > 90 then text = os.date("[%H:%M] ", item.t) .. text end
+                if not sendHook(text) then break end
+                table.remove(S.outbox, 1)
+                sent = sent + 1
+                saveState()
+                task.wait(1)
+            end
+        end)
+        flushing = false
+    end)
+end
 local function notify(msg)
     if CFG.WEBHOOK == "" then return end
-    local req = reqFn()
-    if not req then return end
-    task.spawn(function()
-        pcall(req, {
-            Url = CFG.WEBHOOK, Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HS:JSONEncode({ content = msg }),
-        })
-    end)
+    local tag = CFG.WEBHOOK_TAG and ("[" .. tostring(lp.Name) .. "] ") or ""
+    table.insert(S.outbox, { t = os.time(), m = tag .. msg })
+    while #S.outbox > 20 do table.remove(S.outbox, 1) end
+    saveState()
+    flushOutbox()
 end
 
 -- ให้สคิปนี้รันซ้ำเองหลังทุกการวาร์ป
@@ -1220,10 +1142,28 @@ if queue_on_teleport then
     queue_on_teleport('loadstring(readfile("' .. FILE .. '"))()')
 end
 
+local function enumName(v)
+    local s = tostring(v)
+    return s:match("([%w_]+)$") or s
+end
+-- ผลวาร์ปล้มเหลวจริงๆ (GameFull / GameEnded / GameNotFound / Unauthorized / Flooded / IsTeleporting)
+-- เก็บไว้ให้ตัวรีจอยเลือกทางต่อ · IsTeleporting = มีวาร์ปค้างอยู่แล้ว ไม่นับว่าล้มเหลว (รอต่อ)
 pcall(function()
     TS.TeleportInitFailed:Connect(function(_, result, msg)
-        RT.tpFailed = true
-        log("วาร์ปล้มเหลว:", tostring(result), tostring(msg))
+        local name = enumName(result)
+        RT.tpResult, RT.tpMsg = name, tostring(msg or "")
+        if name == "IsTeleporting" then
+            log("วาร์ป: มีวาร์ปค้างอยู่แล้ว รอต่อ")
+        else
+            RT.tpFailed = true
+            log("วาร์ปล้มเหลว:", name, RT.tpMsg:sub(1, 80))
+        end
+    end)
+end)
+-- รู้ว่าเกม/เรากำลังวาร์ปอยู่ (กันตีความว่าหลุดเงียบตอนวาร์ปเข้าแมตช์ตามปกติ)
+pcall(function()
+    lp.OnTeleport:Connect(function(state)
+        if enumName(state) == "Failed" then RT.tpSeen = nil else RT.tpSeen = os.clock() end
     end)
 end)
 
@@ -1349,12 +1289,64 @@ local function pressReconnect(waitSec)
     return true
 end
 
--- ===================== ตรวจว่าหลุดไหม =====================
-local function disconnectInfo()
-    -- 1) หน้าต่าง ErrorPrompt ของ Roblox โผล่ขึ้นมา (อ่านข้อความในหน้าต่างด้วย)
-    local up, pmsg = false, ""
+-- ปิดหน้าต่างแจ้งที่ไม่ใช่การหลุด (เช่น วาร์ปล้มเหลวแต่ยังอยู่ในเซิร์ฟ) ด้วยการกดปุ่ม OK/ปิด (ไม่แตะปุ่ม Reconnect/Leave)
+local OK_PATS = { "ok", "ตกลง", "close", "ปิด", "dismiss", "got it" }
+local function dismissPrompt()
     pcall(function()
         local g = game:GetService("CoreGui"):FindFirstChild("RobloxPromptGui")
+        local po = g and g:FindFirstChild("promptOverlay")
+        local root = po and po:FindFirstChild("ErrorPrompt")
+        if not root then return end
+        for _, o in ipairs(root:GetDescendants()) do
+            if o:IsA("GuiButton") then
+                local txt = o:IsA("TextButton") and o.Text or ""
+                for _, d in ipairs(o:GetDescendants()) do
+                    if d:IsA("TextLabel") and d.Text ~= "" then txt = txt .. " " .. d.Text end
+                end
+                local all = o.Name .. " " .. txt
+                if hasAny(all, OK_PATS) and not hasAny(all, RECONNECT_PATS) and not hasAny(txt, LEAVE_PATS) then
+                    log("ปิดหน้าต่างแจ้ง:", o.Name .. "|" .. txt)
+                    click(o)
+                    return
+                end
+            end
+        end
+    end)
+end
+
+-- ===================== เช็คว่า "ยังเชื่อมกับเซิร์ฟอยู่จริงไหม" =====================
+-- ตอนเชื่อมอยู่ NetworkClient มีตัวเชื่อมเครือข่ายเป็นลูก และ LocalPlayer อยู่ใน Players · ถ้าหลุดสองอย่างนี้จะหายไป
+-- ใช้ประกอบการตัดสินเท่านั้น: ถ้าเริ่มสคริปต์ตอนหลุดอยู่แล้ว หรือสัญญาณขัดกัน = "unknown" แล้วทำงานแบบเดิม (v3)
+local NC
+pcall(function() NC = game:GetService("NetworkClient") end)
+local function repCount()
+    local ok, n = pcall(function() return #NC:GetChildren() end)
+    if ok and type(n) == "number" then return n end
+    return nil
+end
+RT.hadRep = (repCount() or 0) > 0
+local function sessionState()
+    if not RT.hadRep then return "unknown" end
+    local n = repCount()
+    if n == nil then return "unknown" end
+    local inPlayers = (lp.Parent == Players)
+    if n > 0 and inPlayers then return "alive" end
+    if n == 0 and not inPlayers then return "dead" end
+    return "unknown"
+end
+-- เกม/เรากำลังวาร์ปอยู่ไหม (ภายใน 90 วิหลังได้สัญญาณวาร์ป ไม่ตีความว่าหลุดเงียบ)
+local function tpRecent()
+    return RT.tpSeen ~= nil and os.clock() - RT.tpSeen < 90
+end
+
+-- ===================== ตรวจว่าหลุดไหม =====================
+-- คืน (หลุดไหม, ข้อความ, มาจากหน้าต่างจริงไหม, เห็น CoreGui ไหม)
+local function disconnectInfo()
+    -- 1) หน้าต่าง ErrorPrompt ของ Roblox โผล่ขึ้นมา (อ่านข้อความในหน้าต่างด้วย)
+    local up, pmsg, coreSeen = false, "", false
+    pcall(function()
+        local g = game:GetService("CoreGui"):FindFirstChild("RobloxPromptGui")
+        coreSeen = (g ~= nil)
         local po = g and g:FindFirstChild("promptOverlay")
         local ep = po and po:FindFirstChild("ErrorPrompt")
         if ep and (not ep:IsA("GuiObject") or ep.Visible) then
@@ -1367,12 +1359,12 @@ local function disconnectInfo()
             end
         end
     end)
-    -- 2) ข้อความ error ของ GuiService (กรณี executor เข้า CoreGui ไม่ได้)
+    -- 2) ข้อความ error ของ GuiService (กรณี executor เข้า CoreGui ไม่ได้) · ถ้ามีหน้าต่างจริง ใช้ข้อความในหน้าต่างก่อน (สดกว่า)
     local msg = ""
     pcall(function() msg = GuiService:GetErrorMessage() or "" end)
     if type(msg) ~= "string" then msg = "" end
-    if msg == "" then msg = pmsg end
-    return (up or msg ~= ""), msg
+    if pmsg ~= "" then msg = pmsg end
+    return (up or msg ~= ""), msg, up, coreSeen
 end
 
 -- เช็คว่าเน็ตกลับมาไหม (ยิงขอข้อมูลเล็กๆ ไป Roblox) ถ้า executor ไม่มี request ถือว่าออนไลน์
@@ -1415,33 +1407,184 @@ local function fetchRoot()
     return nil, "อ่านข้อมูลเกมไม่ได้"
 end
 
--- หาเซิร์ฟสาธารณะที่ยังว่าง (เหลือที่ว่างอย่างน้อย 2 ที่ และมีคนอยู่แล้ว = เซิร์ฟยังไม่ปิด)
-local function findOpenServer(placeId)
-    local req = reqFn()
-    if not req then return nil, "executor ไม่มี request" end
-    local ok, res = pcall(req, {
-        Url = "https://games.roblox.com/v1/games/" .. tostring(placeId) .. "/servers/Public?sortOrder=Desc&limit=100",
-        Method = "GET",
-    })
-    if not ok then return nil, tostring(res) end
-    if type(res) ~= "table" or not res.Body then return nil, "ไม่มีข้อมูลตอบกลับ" end
-    if res.StatusCode and res.StatusCode ~= 200 then return nil, "HTTP " .. tostring(res.StatusCode) end
-    local ok2, data = pcall(function() return HS:JSONDecode(res.Body) end)
-    if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then return nil, "อ่านรายการเซิร์ฟไม่ได้" end
-    local cands = {}
-    for _, s in ipairs(data.data) do
-        if type(s) == "table" and s.id and s.id ~= game.JobId then
-            local pl, mx = tonumber(s.playing) or 0, tonumber(s.maxPlayers) or 0
-            if pl >= 1 and pl <= mx - 2 then cands[#cands + 1] = { id = s.id, pl = pl } end
+-- ===================== จำเซิร์ฟที่เข้าไม่ได้ =====================
+local function isBad(id)
+    local ts = S.bad[id]
+    if not ts then return false end
+    if ts <= os.time() then
+        S.bad[id] = nil
+        return false
+    end
+    return true
+end
+local function markBad(id, ttl)
+    if not id then return end
+    local now = os.time()
+    S.bad[id] = now + (ttl or CFG.BAD_SERVER_TTL)
+    local n, oldK, oldT = 0, nil, math.huge
+    for k, ts in pairs(S.bad) do
+        if ts <= now then
+            S.bad[k] = nil
+        else
+            n = n + 1
+            if ts < oldT then oldK, oldT = k, ts end
         end
     end
-    if #cands == 0 then return nil, "ไม่มีเซิร์ฟที่ว่าง" end
-    table.sort(cands, function(a, b) return a.pl > b.pl end)
-    local pick = cands[math.random(1, math.min(5, #cands))]
-    return pick.id
+    if n > 60 and oldK then S.bad[oldK] = nil end
+    saveState()
+end
+
+-- คัดเซิร์ฟที่น่าเข้า: มีคนอยู่ (ยังไม่ปิด) · เหลือที่ว่างพอ (ไม่ใกล้เต็มจนแย่งที่ไม่ทัน) · ไม่แลค · ไม่ใช่เซิร์ฟเดิม/เซิร์ฟที่เคยเข้าไม่ได้
+local function qualify(list)
+    local cands = {}
+    for _, s in ipairs(list) do
+        if type(s) == "table" and type(s.id) == "string" and s.id ~= game.JobId and not isBad(s.id) then
+            local pl, mx = tonumber(s.playing) or 0, tonumber(s.maxPlayers) or 0
+            local fps, ping = tonumber(s.fps), tonumber(s.ping)
+            local minFree = math.max(2, math.floor(mx * 0.15))
+            local laggy = (fps ~= nil and fps > 0 and fps < 20)
+            if pl >= 1 and mx - pl >= minFree and not laggy then
+                cands[#cands + 1] = { id = s.id, pl = pl, score = math.min(fps or 40, 60) - math.min(ping or 0, 500) / 25 }
+            end
+        end
+    end
+    table.sort(cands, function(a, b) return a.score > b.score end)
+    return cands
+end
+
+-- ดึงรายการเซิร์ฟสาธารณะ (ไม่รวมเซิร์ฟเต็ม) สูงสุด 2 หน้า · โดนลิมิต 429 = จำไว้แล้วข้ามการค้นหา 60 วิ
+local function fetchServers(placeId)
+    local req = reqFn()
+    if not req then return nil, "executor ไม่มี request" end
+    local list, cursor = {}, nil
+    local function partial(why) return (#list > 0) and list or nil, why end
+    for page = 1, 2 do
+        local url = "https://games.roblox.com/v1/games/" .. tostring(placeId)
+            .. "/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100"
+            .. (cursor and ("&cursor=" .. cursor) or "")
+        local ok, res = pcall(req, { Url = url, Method = "GET" })
+        if not ok then return partial(tostring(res)) end
+        if type(res) ~= "table" or not res.Body then return partial("ไม่มีข้อมูลตอบกลับ") end
+        if res.StatusCode == 429 then
+            RT.apiBlockedUntil = os.clock() + 60
+            return partial("HTTP 429 (โดนจำกัดความถี่)")
+        end
+        if res.StatusCode and res.StatusCode ~= 200 then return partial("HTTP " .. tostring(res.StatusCode)) end
+        local ok2, data = pcall(function() return HS:JSONDecode(res.Body) end)
+        if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then return partial("อ่านรายการเซิร์ฟไม่ได้") end
+        for _, s in ipairs(data.data) do list[#list + 1] = s end
+        cursor = data.nextPageCursor
+        if type(cursor) ~= "string" or cursor == "" or #qualify(list) >= 8 then break end
+        if page < 2 then task.wait(0.6) end
+    end
+    return list
+end
+
+-- เลือกเซิร์ฟว่าง: สุ่มจาก 6 อันดับแรก (หลายบัญชีจะไม่แห่ไปเซิร์ฟเดียวกัน) · ใช้รายการที่เพิ่งดึงไม่เกิน 60 วิซ้ำได้
+local function findOpenServer(placeId)
+    if RT.apiBlockedUntil and os.clock() < RT.apiBlockedUntil then
+        return nil, "API ติดลิมิต รออีก " .. math.ceil(RT.apiBlockedUntil - os.clock()) .. " วิ"
+    end
+    local cands
+    local c = RT.srvCache
+    if c and c.place == placeId and os.clock() - c.t < 60 then cands = qualify(c.list) end
+    if not cands or #cands == 0 then
+        local list, err = fetchServers(placeId)
+        if not list then return nil, err end
+        RT.srvCache = { place = placeId, t = os.clock(), list = list }
+        cands = qualify(list)
+        if #cands == 0 then return nil, err or "ไม่มีเซิร์ฟที่ว่าง" end
+    end
+    return cands[math.random(1, math.min(6, #cands))].id
 end
 
 -- ===================== เข้าเกมใหม่เมื่อหลุด =====================
+-- ---------- ตัวช่วย: จำวิธีที่ใช้ได้ผล / ทำอะไรต่อหลังลองแต่ละครั้ง ----------
+-- อัตราสำเร็จ (ปรับให้เรียบ) ของแต่ละวิธี: ยังไม่มีข้อมูล = 0.5
+local function mrate(m)
+    local st = S.mstat[m]
+    if not st then return 0.5 end
+    local ok, fail = st.ok or 0, st.fail or 0
+    return (ok + 1) / (ok + fail + 2)
+end
+local function mnote(m, good)
+    if not CFG.LEARN_METHODS or (m ~= "same" and m ~= "open" and m ~= "any") then return end
+    local st = S.mstat[m] or { ok = 0, fail = 0 }
+    st.ok, st.fail = (st.ok or 0) * 0.9, (st.fail or 0) * 0.9   -- ผลเก่าค่อยๆ หมดน้ำหนัก
+    if good then st.ok = st.ok + 1 else st.fail = st.fail + 1 end
+    S.mstat[m] = st
+    saveState()
+end
+
+-- โดนเตะ AFK ทั้งที่เปิดกันไว้ -> เพิ่มระดับกัน AFK (มีผลรอบหน้าหลังรีจอย) · IDLE_LEVEL ตั้งเอง = ไม่ปรับ
+local function bumpIdleLevel()
+    if not CFG.ANTI_IDLE or (type(CFG.IDLE_LEVEL) == "number" and CFG.IDLE_LEVEL >= 1) then return end
+    local cur = S.idleLevel or 1
+    if cur < 3 then
+        S.idleLevel = cur + 1
+        saveState()
+        log("โดนเตะ AFK ทั้งที่เปิดกันไว้ -> เพิ่มระดับกัน AFK เป็น", S.idleLevel)
+    else
+        log("โดนเตะ AFK แม้ใช้ระดับกันสูงสุดแล้ว (เกมนี้อาจนับ AFK เอง)")
+    end
+end
+
+-- ลำดับวิธีเข้า (กฎเดิมของ v3) แล้วขยับวิธีที่เคยสำเร็จบ่อยกว่าชัดเจนขึ้นมาก่อน
+local function buildPlan(info, offMain)
+    local plan = {}
+    if CFG.TRY_SAME_SERVER and not info.nosame and game.JobId ~= "" and not offMain then plan[#plan + 1] = "same" end
+    if offMain and CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
+    plan[#plan + 1] = "any"
+    if (not offMain) and CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
+    if CFG.LEARN_METHODS then
+        for i = 2, #plan do
+            local j = i
+            while j > 1 and mrate(plan[j]) > mrate(plan[j - 1]) + 0.15 do
+                plan[j], plan[j - 1] = plan[j - 1], plan[j]
+                j = j - 1
+            end
+        end
+    end
+    return plan
+end
+
+-- ติดลูป: เวลาพักรอบนี้ (เพิ่มเท่าตัวทุกครั้งที่ติดซ้ำ สูงสุด 30 นาที · ถ้าเกือบทั้งหมดเป็นโดนเตะ พักนานกว่านั้น)
+local function loopCooldown()
+    if not CFG.LOOP_BACKOFF then return CFG.LOOP_COOLDOWN, false end
+    S.loopStreak = (S.loopStreak or 0) + 1
+    local cd = math.min(1800, CFG.LOOP_COOLDOWN * (2 ^ (S.loopStreak - 1)))
+    local kicks = 0
+    for _, k in ipairs(S.recentK) do
+        if k == "kick" then kicks = kicks + 1 end
+    end
+    local kickLoop = kicks >= 3 and kicks * 2 >= #S.recentK
+    if kickLoop then cd = math.min(3600, cd * 2) end
+    saveState()
+    return math.floor(cd), kickLoop
+end
+
+-- หลังลองวิธีหนึ่งแล้วไม่สำเร็จ: ดูผลวาร์ปจริงแล้วจดไว้ว่าเซิร์ฟ/เป้าหมายไหนเข้าไม่ได้ จะได้ไม่ลองซ้ำ
+local function afterAttempt(m, target, ok, online)
+    local res, id = RT.tpResult, RT.lastTryId
+    if m == "open" and id then
+        if res == "GameFull" or res == "GameEnded" or res == "GameNotFound" or (ok and not RT.tpFailed and res ~= "IsTeleporting") then
+            markBad(id)
+            log("จำเซิร์ฟนี้ว่าเข้าไม่ได้ ไม่เลือกซ้ำ:", id:sub(1, 8))
+        end
+    end
+    if m == "any" and (res == "Unauthorized" or res == "GameNotFound") and target ~= game.PlaceId then
+        S.badTarget[tostring(target)] = os.time()
+        saveState()
+        log("เป้าหมาย", target, "เข้าไม่ได้ (" .. res .. ") ครั้งหน้าใช้แมพที่อยู่แทน")
+    end
+    if res == "Flooded" then
+        RT.extraWait = 45
+        log("วาร์ปถี่เกินไป (Flooded) พักเพิ่มก่อนลองใหม่")
+    end
+    if online then mnote(m, false) end
+    RT.tpResult = nil
+end
+
 -- info = ผลจาก classify/mkInfo, opts.test = ปุ่มทดสอบ, opts.planned = รีจอยเองตั้งใจ (เช่น RAM สูง)
 local function reconnect(info, opts)
     if RT.rejoining then return end
@@ -1452,46 +1595,56 @@ local function reconnect(info, opts)
     local why = whyText(info)
     S.disconnectAt = S.disconnectAt or now
     S.pending = opts.test and "test" or (opts.planned and "planned" or "drop")
+    local pauseCd
     if S.pending == "drop" then
         S.drops = (S.drops or 0) + 1
         S.lastDisc = now
         S.lastReason = info.label
         table.insert(S.recent, now)
+        table.insert(S.recentK, info.k or "?")
         pushEvent("หลุด", why)
         log("หลุดจากเกม:", why, (info.msg ~= "" and ("| " .. info.msg:sub(1, 60)) or ""))
         notify("Auto Rejoin: หลุดจากเกม (" .. why .. ") กำลังพยายามเข้าใหม่")
+        if info.k == "idle" then bumpIdleLevel() end
+        -- หลุดถี่ผิดปกติ (ติดลูป): พักก่อนแล้วค่อยลอง ไม่ยิง Teleport รัวๆ
+        if recentCount() >= CFG.LOOP_LIMIT then
+            local kickLoop
+            pauseCd, kickLoop = loopCooldown()
+            log("หลุดถี่ผิดปกติ (" .. #S.recent .. " ครั้งใน " .. span(CFG.LOOP_WINDOW) .. ") พัก " .. span(pauseCd)
+                .. (kickLoop and " · โดนเตะซ้ำๆ" or ""))
+            pushEvent("ติดลูป", "พัก " .. span(pauseCd))
+            notify("Auto Rejoin: ติดลูป หลุด " .. #S.recent .. " ครั้งใน " .. span(CFG.LOOP_WINDOW) .. " พัก " .. span(pauseCd)
+                .. (kickLoop and " (โดนเตะซ้ำๆ อาจมีระบบตรวจจับ ควรเข้ามาดู)" or "") .. " ก่อนลองใหม่")
+        end
     else
         pushEvent(opts.test and "ทดสอบ" or "รีจอยเอง", why)
         log(opts.test and "ทดสอบ: จะวาร์ปจริงตามเป้าหมายรีจอย" or ("รีจอยเอง: " .. why))
     end
 
+    -- สคิปฟาร์มที่อยากให้รันหลังรีจอย: ฝากไว้ในคิวของการวาร์ปครั้งถัดไป (ครั้งเดียวต่อการหลุด)
+    if CFG.AFTER_REJOIN_FILE ~= "" and queue_on_teleport then
+        queue_on_teleport('pcall(function() loadstring(readfile("' .. CFG.AFTER_REJOIN_FILE .. '"))() end)')
+        log("ฝากสคิปฟาร์มไว้รันหลังรีจอย:", CFG.AFTER_REJOIN_FILE)
+    end
+
     guard("reconnect", function()
-        -- หลุดถี่ผิดปกติ (ติดลูป): พักก่อนแล้วค่อยลอง ไม่ยิง Teleport รัวๆ
-        if S.pending == "drop" and recentCount() >= CFG.LOOP_LIMIT then
-            local cd = CFG.LOOP_COOLDOWN
-            log("หลุดถี่ผิดปกติ (" .. #S.recent .. " ครั้งใน " .. span(CFG.LOOP_WINDOW) .. ") พัก " .. span(cd))
-            pushEvent("ติดลูป", "พัก " .. span(cd))
-            notify("Auto Rejoin: ติดลูป หลุด " .. #S.recent .. " ครั้งใน " .. span(CFG.LOOP_WINDOW) .. " พัก " .. span(cd) .. " ก่อนลองใหม่")
+        if pauseCd then
             local t0 = os.clock()
-            while RT.auto and os.clock() - t0 < cd do
-                UI.set("หลุดถี่ พักก่อน", COL.warn, "ลองใหม่ใน " .. span(cd - (os.clock() - t0)))
+            while RT.auto and os.clock() - t0 < pauseCd do
+                UI.set("หลุดถี่ พักก่อน", COL.warn, "ลองใหม่ใน " .. span(pauseCd - (os.clock() - t0)))
                 task.wait(5)
             end
+            pauseCd = nil
         end
 
-        -- ลำดับวิธีเข้า: เซิร์ฟเดิม -> สุ่มเซิร์ฟ -> เซิร์ฟที่ว่าง แล้วสลับสุ่ม/ว่างต่อไป
+        -- ลำดับวิธีเข้า: เซิร์ฟเดิม -> สุ่มเซิร์ฟ -> เซิร์ฟที่ว่าง แล้วสลับสุ่ม/ว่างต่อไป (เรียงใหม่ตามที่เคยสำเร็จบ่อย)
         -- แมตช์/เซิร์ฟส่วนตัว (ไม่ใช่หน้าหลักของเกม หรือเป็นเซิร์ฟส่วนตัว) วาร์ปกลับเซิร์ฟเดิมด้วย JobId ไม่ได้
         local offMain = (game.PrivateServerId ~= "") or (resolveTarget() ~= game.PlaceId)
         local reconnectFirst = CFG.CLICK_RECONNECT and offMain and CFG.REJOIN_PLACE_ID == 0
-        local plan = {}
-        if CFG.TRY_SAME_SERVER and not info.nosame and game.JobId ~= "" and not offMain then
-            plan[#plan + 1] = "same"
-        end
-        if offMain and CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
-        plan[#plan + 1] = "any"
-        if (not offMain) and CFG.FIND_OPEN_SERVER then plan[#plan + 1] = "open" end
+        local plan = buildPlan(info, offMain)
         log("แผนรีจอยรอบนี้:", reconnectFirst and "กดปุ่ม Reconnect ก่อน แล้ววาร์ป" or "วาร์ปตามลำดับ",
-            "· PlaceId =", game.PlaceId, "· เซิร์ฟส่วนตัว =", tostring(game.PrivateServerId ~= ""))
+            "· ลำดับ:", table.concat(plan, ">"), "· PlaceId =", game.PlaceId,
+            "· เซิร์ฟส่วนตัว =", tostring(game.PrivateServerId ~= ""))
         pcall(function()
             local _, _, found = findReconnectButton()
             if #found > 0 then log("ปุ่มบนหน้าต่างหลุด:", table.concat(found, " / ")) end
@@ -1506,13 +1659,18 @@ local function reconnect(info, opts)
                 return
             end
             attempt = attempt + 1
+            RT.tpResult, RT.lastTryId = nil, nil
 
-            if not waitOnline(CFG.ONLINE_WAIT) and RT.auto then
+            local online = waitOnline(CFG.ONLINE_WAIT)
+            if not online and RT.auto then
                 log("เช็คเน็ตไม่ผ่านนานเกิน", span(CFG.ONLINE_WAIT), "ลองสั่งเข้าเลย")
             end
+            if online then flushOutbox() end
 
             -- แมตช์/เซิร์ฟส่วนตัว: กดปุ่ม Reconnect ของ Roblox ก่อน (เหมือนที่เรากดเอง) ไม่พาเข้าค่อยวาร์ปไปล็อบบี้
             if RT.auto and reconnectFirst then
+                S.tryMethod, S.tryAt = "click", os.time()
+                saveState()
                 UI.set("หลุด! กดปุ่มเชื่อมต่อใหม่", COL.bad, "ครั้งที่ " .. attempt .. " · ปุ่ม Reconnect ของ Roblox")
                 pressReconnect(CFG.RECONNECT_WAIT)
             end
@@ -1521,6 +1679,8 @@ local function reconnect(info, opts)
                 local target, how = resolveTarget()
                 local m = plan[attempt]
                 if not m then m = (CFG.FIND_OPEN_SERVER and attempt % 2 == 1) and "open" or "any" end
+                S.tryMethod, S.tryAt = m, os.time()
+                saveState()
                 local mlabel = (m == "same" and "เซิร์ฟเดิม") or (m == "open" and "เซิร์ฟที่ว่าง") or "เซิร์ฟสุ่ม"
                 UI.set("หลุด! กำลังเข้าใหม่", COL.bad,
                     "ครั้งที่ " .. attempt .. " · " .. mlabel .. " · " .. target .. " (" .. how .. ")")
@@ -1531,9 +1691,11 @@ local function reconnect(info, opts)
                 elseif m == "open" then
                     local id, why2 = findOpenServer(target)
                     if id then
+                        RT.lastTryId = id
                         ok, err = pcall(function() TS:TeleportToPlaceInstance(target, id, lp) end)
                     else
-                        mlabel = "เซิร์ฟสุ่ม"
+                        m, mlabel = "any", "เซิร์ฟสุ่ม"
+                        S.tryMethod = "any"
                         log("หาเซิร์ฟที่ว่างไม่ได้ (" .. tostring(why2) .. ") ใช้เซิร์ฟสุ่มแทน")
                         ok, err = pcall(function() TS:Teleport(target, lp) end)
                     end
@@ -1551,16 +1713,22 @@ local function reconnect(info, opts)
                 end
                 if RT.auto then
                     log(RT.tpFailed and "วาร์ปล้มเหลว" or ((not ok) and "สั่งวาร์ปไม่ได้" or "ค้างเกิน " .. CFG.STUCK_SECONDS .. " วิ"), "-> ไปวิธีถัดไป")
+                    afterAttempt(m, target, ok, online)
                 end
 
                 -- วิธีสำรอง: กดปุ่ม Reconnect/Rejoin บนหน้าต่างแจ้งหลุด
                 if RT.auto and CFG.CLICK_RECONNECT then
+                    S.tryMethod, S.tryAt = "click", os.time()
+                    saveState()
                     pressReconnect(20)
                 end
             end
 
             if RT.auto then
+                -- รอแบบสุ่มเวลา ±20% (หลายบัญชี/หลายเครื่องจะไม่แห่ลองพร้อมกันตอน Roblox ล่ม)
                 local delay = math.min(CFG.RETRY_DELAY * attempt, 120)
+                delay = math.floor(delay * (0.8 + math.random() * 0.4)) + (RT.extraWait or 0)
+                RT.extraWait = nil
                 UI.set("ยังเข้าไม่ได้ รอลองใหม่", COL.warn, "รออีก " .. delay .. " วิ (เน็ตอาจยังไม่กลับมา)")
                 task.wait(delay)
             end
@@ -1580,106 +1748,12 @@ local function halt(info)
     notify("Auto Rejoin: หยุดรีจอย (" .. why .. ") ต้องเข้ามาตรวจเอง")
 end
 
--- ===================== สคิปหลัก (รันคู่กับสคิปรีจอย) =====================
--- อ่านสคิปจากไฟล์ใน workspace หรือจากลิงก์ https คืน: โค้ด หรือ nil + ข้อความ error
-local function readMainSource(name)
-    if name:match("^https?://") then
-        local ok, r = pcall(function() return game:HttpGet(name) end)
-        if ok and type(r) == "string" and r ~= "" then return r end
-        local req = reqFn()
-        if req then
-            local ok2, res = pcall(req, { Url = name, Method = "GET" })
-            if ok2 and type(res) == "table" and res.StatusCode == 200
-                and type(res.Body) == "string" and res.Body ~= "" then
-                return res.Body
-            end
-        end
-        return nil, "โหลดลิงก์ไม่ได้"
-    end
-    if not (isfile and readfile) then return nil, "executor ไม่มี readfile/isfile" end
-    local okf, exists = pcall(isfile, name)
-    if not (okf and exists) then return nil, "ไม่พบไฟล์ " .. name end
-    local ok, r = pcall(readfile, name)
-    if not ok or type(r) ~= "string" then return nil, "อ่านไฟล์ไม่ได้" end
-    if r:match("^%s*$") then return nil, "ไฟล์ว่าง" end
-    return r
-end
-
--- รันสคิปหลักหนึ่งครั้ง คืน: ok, ข้อความ error, เป็นปัญหาตอนดึงสคิป (ลองใหม่ได้)
-local function launchMain(why, force)
-    local name = getMain()
-    if not name then return false, "ยังไม่ได้เลือกสคิปหลัก" end
-    if not force and genv.AA_MAIN_LAUNCHED then return false, "รันไปแล้วรอบนี้" end
-    local src, e = readMainSource(name)
-    if not src then
-        log("รันสคิปหลักไม่ได้:", e)
-        pushEvent("สคิปหลัก", "ไม่ได้: " .. tostring(e))
-        return false, e, true
-    end
-    local fn, perr = loadstring(src)
-    if not fn then
-        log("สคิปหลักมีข้อผิดพลาดตอนโหลด:", tostring(perr):sub(1, 100))
-        pushEvent("สคิปหลัก", "โหลดไม่ผ่าน")
-        return false, tostring(perr), false
-    end
-    genv.AA_MAIN_LAUNCHED = true
-    log("รันสคิปหลัก:", name, "(" .. why .. ")")
-    pushEvent("สคิปหลัก", name)
-    task.spawn(function()
-        local ok, err = xpcall(fn, function(m) return tostring(m) end)
-        if not ok then log("สคิปหลักเกิด error:", tostring(err):sub(1, 120)) end
-    end)
-    return true
-end
-
--- ตอนสคิปรีจอยเริ่มทำงาน: ดูโหมดที่เลือก แล้วรันสคิปหลักให้ถ้าเข้าเงื่อนไข
-local function autoLaunchMain(justRejoined)
-    local mode = S.runMode or 2
-    local name = getMain()
-    if mode == 1 or not name then return end
-    local go
-    if MANUAL then go = CFG.MAIN_ON_MANUAL
-    elseif mode == 3 then go = true
-    else go = justRejoined end
-    if not go then
-        log("สคิปหลัก: รอบนี้ไม่ต้องรัน (" .. (MANUAL and "คุณรันสคิปรีจอยเอง" or "ไม่ใช่การรีจอย") .. ")")
-        return
-    end
-    task.spawn(function()
-        UI.set("รอรันสคิปหลัก", COL.warn, name)
-        local t0 = os.clock()
-        while not lp.Character and os.clock() - t0 < 30 do task.wait(1) end
-        task.wait(math.max(0, tonumber(CFG.MAIN_DELAY) or 0))
-        if not RT.auto then
-            log("ข้ามสคิปหลัก: สวิตช์รีจอยปิดอยู่")
-            return
-        end
-        if (disconnectInfo()) then
-            log("ข้ามสคิปหลัก: หน้าต่างหลุดขึ้นอยู่ (กำลังจะรีจอยอีกรอบ)")
-            return
-        end
-        local why = MANUAL and "รันคู่กับสคิปรีจอย" or (justRejoined and "หลังรีจอย" or "เข้าเกมใหม่")
-        local ok, err
-        for i = 1, 3 do
-            local fetchFail
-            ok, err, fetchFail = launchMain(why)
-            if ok or not fetchFail then break end
-            log("ลองดึงสคิปหลักใหม่ใน 10 วิ (" .. i .. "/3)")
-            task.wait(10)
-        end
-        if ok then
-            UI.set(RT.auto and "เฝ้าดูการหลุดอยู่" or "ปิดรีจอยอยู่", RT.auto and COL.ok or COL.dim,
-                "สคิปหลัก: " .. name .. " รันแล้ว")
-        else
-            UI.set("รันสคิปหลักไม่ได้", COL.warn, tostring(err):sub(1, 100))
-            notify("Auto Rejoin: รันสคิปหลักไม่ได้ (" .. tostring(err):sub(1, 80) .. ")")
-        end
-    end)
-end
-
 -- ===================== เริ่มทำงาน =====================
 local function main()
     log("PlaceId =", game.PlaceId, "· GameId =", game.GameId)
+    log("ตรวจหลุดหลายสัญญาณ:", CFG.SMART_DETECT and "เปิด" or "ปิด",
+        "· ตัวเชื่อมเครือข่าย:", RT.hadRep and "เห็น (ใช้ตัดสินได้)" or "ไม่เห็น (ใช้วิธีเดิมของ v3)")
+    if LEGACY then log("พบสคริปต์รุ่นเก่ายังรันอยู่ในเซิร์ฟนี้ อาจรีจอยซ้อนกันจนกว่าจะรีจอยรอบหน้า") end
 
     -- เช็ค executor
     local caps = {
@@ -1737,29 +1811,27 @@ local function main()
     end
 
     -- เพิ่งกลับเข้าเกมได้?
-    local justRejoined = S.disconnectAt ~= nil
     if S.disconnectAt then
         local down = os.time() - S.disconnectAt
         local kind = S.pending or "drop"
         S.disconnectAt = nil
         S.pending = nil
-        if kind == "drop" then S.reconnects = S.reconnects + 1 end
+        if kind == "drop" then
+            S.reconnects = S.reconnects + 1
+            -- วิธีที่ลองล่าสุดก่อนสคริปต์นี้เริ่มใหม่ = วิธีที่พากลับมาได้ (ไม่นับถ้าเกิน 5 นาที เผื่อผู้ใช้กดรีจอยเอง)
+            if S.tryMethod and S.tryAt and os.time() - S.tryAt <= 300 then mnote(S.tryMethod, true) end
+        end
+        S.tryMethod, S.tryAt = nil, nil
         pushEvent("เข้าใหม่", "หลุดไป " .. span(down))
         log("กลับเข้าเกมสำเร็จ หลุดไป", span(down))
         if kind == "drop" then
             notify("Auto Rejoin: กลับเข้าเกมได้แล้ว หลุดไป " .. span(down) .. " (รวม " .. S.reconnects .. " ครั้ง)")
         end
         UI.set("กลับเข้าเกมสำเร็จ", COL.ok, "หลุดไป " .. span(down) .. " · เฝ้าดูต่อ")
+        flushOutbox()
     else
         UI.set(RT.auto and "เฝ้าดูการหลุดอยู่" or "ปิดรีจอยอยู่", RT.auto and COL.ok or COL.dim, "")
     end
-
-    UI.act.runMain = function()
-        local ok, err = launchMain("กดรันเอง", true)
-        if not ok then UI.set("รันสคิปหลักไม่ได้", COL.warn, tostring(err):sub(1, 100)) end
-        return ok
-    end
-    autoLaunchMain(justRejoined)
 
     UI.act.test = function()
         reconnect(mkInfo("test", "ทดสอบ (กดปุ่มเอง)"), { test = true })
@@ -1773,71 +1845,147 @@ local function main()
         end
     end)
 
-    -- กันโดนเตะเพราะ AFK
+    -- กันโดนเตะเพราะ AFK: ระดับ 1 = VirtualUser · 2 = + กดเมาส์ขวาแบบคลาสสิก · 3 = + ขยับเมาส์ผ่าน VirtualInputManager และถี่ขึ้น
+    -- ถ้ายังโดนเตะ AFK ทั้งที่เปิดอยู่ (IDLE_LEVEL = 0) จะเพิ่มระดับเองแล้วจำข้ามการวาร์ป
     if CFG.ANTI_IDLE then
+        local lvl = CFG.IDLE_LEVEL
+        if type(lvl) ~= "number" or lvl < 1 then lvl = S.idleLevel or 1 end
+        lvl = math.clamp(math.floor(lvl), 1, 3)
+        RT.idleLevel = lvl
+        local INTERVAL = { 540, 300, 150 }
+        local VU, VIM
+        pcall(function() VU = game:GetService("VirtualUser") end)
+        pcall(function() VIM = game:GetService("VirtualInputManager") end)
+        log("กัน AFK ระดับ", lvl, "· ทุก", INTERVAL[lvl], "วิ · VirtualUser:", tostring(VU ~= nil), "· VirtualInputManager:", tostring(VIM ~= nil))
+        local function poke()
+            if VU then
+                pcall(function() VU:CaptureController(); VU:ClickButton2(Vector2.new(0, 0)) end)
+                if lvl >= 2 then
+                    pcall(function()
+                        local cam = workspace.CurrentCamera
+                        local cf = cam and cam.CFrame or CFrame.new()
+                        VU:Button2Down(Vector2.new(0, 0), cf)
+                        task.wait(0.15)
+                        VU:Button2Up(Vector2.new(0, 0), cf)
+                    end)
+                end
+            end
+            if VIM and (lvl >= 3 or not VU) then
+                pcall(function()
+                    local cam = workspace.CurrentCamera
+                    local vs = cam and cam.ViewportSize or Vector2.new(800, 600)
+                    VIM:SendMouseMoveEvent(vs.X * 0.5 + 1, vs.Y * 0.5 + 1, game)
+                    task.wait(0.05)
+                    VIM:SendMouseMoveEvent(vs.X * 0.5, vs.Y * 0.5, game)
+                end)
+            end
+            RT.idleHits = (RT.idleHits or 0) + 1
+        end
         guard("antiidle", function()
-            local VU = game:GetService("VirtualUser")
-            lp.Idled:Connect(function()
-                pcall(function() VU:CaptureController(); VU:ClickButton2(Vector2.new(0, 0)) end)
-                RT.idleHits = (RT.idleHits or 0) + 1
-                log("กัน AFK (Idled)")
-            end)
+            if not RT.idleConn then   -- ต่อ Idled ครั้งเดียว (ถ้างานนี้พังแล้วเริ่มใหม่ จะไม่ต่อซ้ำ)
+                RT.idleConn = lp.Idled:Connect(function()
+                    poke()
+                    log("กัน AFK (Idled) ระดับ", lvl)
+                end)
+            end
             while true do
-                task.wait(540)
-                pcall(function() VU:CaptureController(); VU:ClickButton2(Vector2.new(0, 0)) end)
-                RT.idleHits = (RT.idleHits or 0) + 1
+                task.wait(INTERVAL[lvl])
+                poke()
             end
         end)
     end
 
     -- เฝ้าดูว่าหลุดไหม + เกมค้าง (ไม่มีตัวละครนาน) + RAM สูง
+    -- ตัดสินจากหลายสัญญาณ: หน้าต่างแจ้งหลุด + รหัส error + "ยังเชื่อมเซิร์ฟอยู่จริงไหม" + เกมกำลังวาร์ปเองไหม
     guard("watch", function()
-        local downSince, noCharSince = nil, nil
-        local lastRam, ramHits = 0, 0
+        local downSince, noCharSince, deadSince = nil, nil, nil
+        local softSig, softAt = nil, -1e9
+        local lastRam, ramHits, lastFlush = 0, 0, 0
         while true do
             task.wait(2)
             if RT.auto and not RT.rejoining then
-                local up, msg = disconnectInfo()
+                local up, msg, viaPrompt, coreSeen = disconnectInfo()
+                local st = CFG.SMART_DETECT and sessionState() or "unknown"
+                -- ไม่มีหน้าต่างจริง มีแต่ข้อความเก่าค้างใน GuiService ขณะที่ยังเชื่อมเซิร์ฟอยู่ = ไม่ใช่การหลุด
+                if up and not viaPrompt and coreSeen and st == "alive" then up = false end
                 if up then
-                    noCharSince = nil
-                    downSince = downSince or os.clock()
-                    if os.clock() - downSince >= CFG.CONFIRM_SECONDS then
+                    noCharSince, deadSince = nil, nil
+                    local info = classify(msg)
+                    if CFG.SMART_DETECT and info.soft and st == "alive" then
+                        -- วาร์ป/เข้าเกมล้มเหลว แต่ยังอยู่ในเซิร์ฟเดิมดีๆ = ไม่ได้หลุด ไม่ต้องรีจอย แค่ปิดหน้าต่าง
                         downSince = nil
-                        local info = classify(msg)
-                        if info.stop then halt(info) else reconnect(info) end
+                        if softSig ~= msg or os.clock() - softAt > 60 then
+                            softSig, softAt = msg, os.clock()
+                            log("ข้าม:", whyText(info), "แต่ยังเชื่อมเซิร์ฟอยู่ (ไม่ใช่การหลุด)")
+                            UI.set("เฝ้าดูการหลุดอยู่", COL.ok, "ข้ามหน้าต่าง: " .. info.label .. " (ยังเชื่อมอยู่)")
+                            dismissPrompt()
+                        end
+                    else
+                        downSince = downSince or os.clock()
+                        -- หลักฐานว่าหลุดจริงแล้ว (ตัวเชื่อมเครือข่ายหาย) ไม่ต้องรอนาน
+                        local need = (st == "dead") and math.min(2, CFG.CONFIRM_SECONDS) or CFG.CONFIRM_SECONDS
+                        if os.clock() - downSince >= need then
+                            downSince = nil
+                            if info.stop then halt(info) else reconnect(info) end
+                        end
                     end
                 else
                     downSince = nil
-
-                    -- เกมค้าง: ไม่มีตัวละครนานผิดปกติ
-                    if CFG.NO_CHAR_SECONDS > 0 and os.clock() - T0 > 30 then
-                        local ch = lp.Character
-                        local alive = ch and ch:FindFirstChildOfClass("Humanoid") and ch:FindFirstChild("HumanoidRootPart")
-                        if alive then
-                            noCharSince = nil
-                        else
-                            noCharSince = noCharSince or os.clock()
-                            if os.clock() - noCharSince >= CFG.NO_CHAR_SECONDS then
-                                noCharSince = nil
-                                reconnect(mkInfo("stuck", "เกมค้าง (ไม่มีตัวละคร)"))
-                            end
+                    local tpNow = tpRecent()
+                    if CFG.SMART_DETECT and CFG.SILENT_SECONDS > 0 and st == "dead" and not tpNow then
+                        -- หลุดจากเซิร์ฟจริงแต่ไม่มีหน้าต่างแจ้ง (เช่น executor เข้า CoreGui ไม่ได้ / เกมซ่อนหน้าต่าง)
+                        noCharSince = nil
+                        deadSince = deadSince or os.clock()
+                        if os.clock() - deadSince >= CFG.SILENT_SECONDS then
+                            deadSince = nil
+                            log("ไม่มีหน้าต่างแจ้ง แต่หลุดจากเซิร์ฟแล้ว (ตัวเชื่อมเครือข่ายหาย)")
+                            reconnect(mkInfo("silent", "หลุดเงียบ (ไม่มีหน้าต่างแจ้ง)"))
                         end
-                    end
+                    else
+                        deadSince = nil
 
-                    -- RAM สูงต่อเนื่อง: รีจอยก่อนเกมแครชเอง
-                    if CFG.RAM_LIMIT_MB > 0 and os.clock() - lastRam >= 30 then
-                        lastRam = os.clock()
-                        local mem = 0
-                        pcall(function() mem = game:GetService("Stats"):GetTotalMemoryUsageMb() end)
-                        if mem > CFG.RAM_LIMIT_MB then ramHits = ramHits + 1 else ramHits = 0 end
-                        if ramHits >= 3 and os.clock() - T0 >= CFG.RAM_MIN_UPTIME then
-                            ramHits = 0
-                            reconnect(mkInfo("ram", "RAM สูง " .. math.floor(mem) .. " MB"), { planned = true })
+                        -- เกมค้าง: ไม่มีตัวละครนานผิดปกติ (ไม่นับช่วงที่เกมกำลังวาร์ป)
+                        if CFG.NO_CHAR_SECONDS > 0 and os.clock() - T0 > 30 and not tpNow then
+                            local ch = lp.Character
+                            local alive = ch and ch:FindFirstChildOfClass("Humanoid") and ch:FindFirstChild("HumanoidRootPart")
+                            if alive then
+                                noCharSince = nil
+                            else
+                                noCharSince = noCharSince or os.clock()
+                                if os.clock() - noCharSince >= CFG.NO_CHAR_SECONDS then
+                                    noCharSince = nil
+                                    reconnect(mkInfo("stuck", "เกมค้าง (ไม่มีตัวละคร)"))
+                                end
+                            end
+                        else
+                            noCharSince = nil
+                        end
+
+                        -- RAM สูงต่อเนื่อง: รีจอยก่อนเกมแครชเอง
+                        if CFG.RAM_LIMIT_MB > 0 and os.clock() - lastRam >= 30 then
+                            lastRam = os.clock()
+                            local mem = 0
+                            pcall(function() mem = game:GetService("Stats"):GetTotalMemoryUsageMb() end)
+                            if mem > CFG.RAM_LIMIT_MB then ramHits = ramHits + 1 else ramHits = 0 end
+                            if ramHits >= 3 and os.clock() - T0 >= CFG.RAM_MIN_UPTIME then
+                                ramHits = 0
+                                reconnect(mkInfo("ram", "RAM สูง " .. math.floor(mem) .. " MB"), { planned = true })
+                            end
                         end
                     end
                 end
             else
-                downSince, noCharSince, ramHits = nil, nil, 0
+                downSince, noCharSince, deadSince, ramHits = nil, nil, nil, 0
+            end
+
+            -- งานเบ็ดเตล็ด: ส่ง webhook ที่ค้างในคิว · ล้างสถานะติดลูปเมื่ออยู่นิ่งนานพอ
+            if #S.outbox > 0 and os.clock() - lastFlush >= 30 then
+                lastFlush = os.clock()
+                flushOutbox()
+            end
+            if (S.loopStreak or 0) > 0 and os.clock() - T0 > CFG.LOOP_WINDOW then
+                S.loopStreak = 0
+                saveState()
             end
         end
     end)
@@ -1859,10 +2007,5 @@ local fn, perr = loadstring(SRC)
 if not fn then
     warn("[REJOIN] โหลดสคิปไม่ได้:", perr)
     return
-end
--- ธงบอกสคิปข้างในว่า "ผู้ใช้กดรันเอง" (ตอนรันซ้ำหลังวาร์ป/autoexec จะไม่มีธงนี้)
-do
-    local g = (getgenv and getgenv()) or _G
-    g.AA_REJOIN_MANUAL = true
 end
 fn()
