@@ -867,6 +867,9 @@ local function buildUI()
     box.FocusLost:Connect(function()
         local t = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
         box.Text = ""
+        -- วางทั้งบรรทัดแบบ loadstring(game:HttpGet("ลิงก์"))() มาได้เลย จะดึงเฉพาะลิงก์ในวงเล็บ HttpGet ไปใช้
+        local u = t:match("HttpGet%w*%s*%(%s*[\"']([^\"']+)[\"']")
+        if u then t = u end
         if t ~= "" then UI.chooseMain(t) end
     end)
     local runFlash
